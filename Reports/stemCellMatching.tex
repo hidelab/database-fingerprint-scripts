@@ -1,0 +1,23 @@
+\documentclass{article}
+\usepackage{Sweave}
+
+\begin{document}
+\title{Matching arrays to cancer stem cells using the pathway fingerprint - hpc111 version}
+\author{Gabriel Altschuler}
+\maketitle
+In this document we will use the fingerprint to \emph{fish} for arrays similiar to stem cells across platforms and species in the GEO corpus.
+\\ The required data and metadata is contained within the R package \verb@pathprint@. We will use the \verb@pathprint.v.0.3.beta3@ build in this session.
+\\ First we need to source the pathprint package and load the data libraries containing the fingerprint and the metadata.
+\begin{Schunk}
+\begin{Sinput}
+> library(pathprint.v0.3.beta3)
+> data(GEO.metadata.matrix)
+> data(GEO.fingerprint.matrix)
+\end{Sinput}
+\end{Schunk}
+Next we will load a curated pluripotent dataset from a local file on the shared directory on \verb@hpc111@.
+\begin{Schunk}
+\begin{Sinput}
+> load(
++  "/data/shared/Fingerprint/curatedCellTypes/curatedPluripotentArrays_20110510.RData"
++     )

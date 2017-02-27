@@ -1,0 +1,358 @@
+\documentclass{article}
+\usepackage{Sweave}
+\usepackage{amsmath}
+\usepackage{amscd}
+\usepackage[tableposition=top]{caption}
+\usepackage{ifthen}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage[usenames]{color}
+\definecolor{midnightblue}{rgb}{0.098,0.098,0.439}
+\DefineVerbatimEnvironment{Sinput}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{midnightblue}}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{xleftmargin=2em}
+\DefineVerbatimEnvironment{Scode}{Verbatim}{xleftmargin=2em}
+\fvset{listparameters={\setlength{\topsep}{0pt}}}
+\renewenvironment{Schunk}{\vspace{\topsep}}{\vspace{\topsep}}
+\SweaveOpts{keep.source=TRUE, pdf.version=1.4, eps = FALSE}
+\begin{document}
+\title{Tissue heatmap - squared mean rank - hpc111 version}
+\author{Gabriel Altschuler}
+\maketitle
+In this document we will use the blood human and mouse lineages to demonstrate the use of the pathway fingerprint to construct a combined phylogeny.
+\\ The required data and metadata is contained within the R package \verb@pathprint@. We will use the \verb@pathprint.v.0.3.beta4@ build in this session.
+\section{Human blood data}
+An initial analysis will be on the human hematopoiesis data published in \emph{Novershtern et al. Densely Interconnected Transcriptional Circuits Control Cell States in Human Hematopoiesis. Cell (2011)}. This is contained within the GEO record GSE24759. First we need to source the pathprint package and load the data libraries.
+\\ The metadata can be extracted from the pathprint metadata matrix
+<<echo=false>>=
+options(width=60)
+options(SweaveHooks=list(fig=function()
+      par(mar=c(1.1, 1.1, 1.1, 1.1)))
+        )
+options(continue=" ")
+@
+<<parsinfo>>=
+# informative sites
+parsinfo = function(x){
+nr <- attr(x, "nr")
+labels = attr(x, "allLevels")
+result = matrix(NA, nrow = length(x), ncol = nr)
+for (i in 1:length(x)) result[i, ] <- x[[i]]
+contrast <- attr(x, "contrast")
+D = tcrossprod(contrast)
+l = dim(contrast)[1] 
+tab = apply(result, 2, tabulate, l)
+tab2 = tab
+tab2[] = FALSE
+tab2[tab>1] = TRUE
+tab3 = tab
+tab3[] = FALSE
+tab3[tab>0] = TRUE ## ==1
+tab3 = t(tab3) 
+ps = rowSums(tab3) - 1
+diag(D) = 0 
+tab4 = tab3 %*% D 
+tab4 = tab3 * tab4 # 
+ind = which(colSums(tab2)==1 & rowSums(tab4)==0)
+ps = rowSums(tab3) - 1
+cbind(ind, ps[ind])
+}
+
+
+
+
+# use only parsimony informative sites
+p.inform<-function(data){
+nr <- attr(data, "nr")
+pis <- parsinfo(data)
+p0 <- sum(attr(data, 'weight')[pis[,1]] * pis[,2])
+data.orig <- data
+data <- phangorn:::getRows(data, c(1:nr)[-pis[,1]])
+return(data)
+}
+@
+
+<<GSE24759.meta>>=
+try(library(ape, lib.loc = .libPaths()[3]))
+library(ape)
+library(phangorn)
+try(library(multicore))
+library(pathprint)
+
+GSE24759.meta<-GEO.metadata.matrix[
+    GEO.metadata.matrix$GSE %in% "GSE24759",]
+GSE24759.meta$cellType<-sapply(GSE24759.meta$Characteristics,
+            function(x){unlist(strsplit(x, split = ";"))[[1]]})
+GSE24759.meta$cellType<-gsub("cell type: ", "", GSE24759.meta$cellType)
+GSE24759.cellTypes<-levels(as.factor(GSE24759.meta$cellType))
+@
+The fingerprints can be extracted from the fingerprint matrix and a consensus fingerprint constructed for each of the cell types.
+<<GSE24759.data>>=
+threshold <- 0.9
+GSE24759.data<-GEO.fingerprint.matrix[,GSE24759.meta$GSM]
+@
+\section{Mouse blood data}
+The GEO dataset GSE6506 profiles hematopoietic stem and progenitor cells during mouse blood development. It would be interesting to know how these cell types relate in terms of their pathway fingerprints.
+<<GSE6506>>=
+GSE6506.meta<-GEO.metadata.matrix[
+    GEO.metadata.matrix$GSE %in% "GSE6506",]
+GSE6506.meta$cellType<-sapply(GSE6506.meta$Source,
+            function(x){unlist(strsplit(x, split = " isolated"))[[1]]})
+GSE6506.meta$cellType<-gsub(" activated with an LPS treatment and", "", GSE6506.meta$cellType)
+GSE6506.cellTypes<-levels(as.factor(GSE6506.meta$cellType))
+@
+The fingerprints can be extracted from the fingerprint matrix and a consensus fingerprint constructed for each of the cell types.
+<<GSE6506.data>>=
+GSE6506.data<-GEO.fingerprint.matrix[,GSE6506.meta$GSM]
+@
+\section{Combining Data}
+The first problem is getting the annotations correct
+<<annotation>>=
+GSE24759.meta$type<-sapply(GSE24759.meta$Title, function(x){unlist(strsplit(x, ","))[1]})
+# re-annotate
+GSE24759.meta$type[grep("CD4+ Effector Memory", GSE24759.meta$type, fixed = TRUE)]<-"CD4+_activated"
+GSE24759.meta$type[setdiff(grep("CD8+ Effector Memory", GSE24759.meta$type, fixed = TRUE), grep("CD8+ Effector Memory RA", GSE24759.meta$type, fixed = TRUE))]<-"CD8+_activated"
+GSE24759.meta$type[grep("Naive CD4+ T-cell", GSE24759.meta$type, fixed = TRUE)]<-"CD4+_naive"
+GSE24759.meta$type[grep("Naive CD8+ T-cell", GSE24759.meta$type, fixed = TRUE)]<-"CD8+_naive"
+GSE24759.meta$type[grep("Mature B-cells", GSE24759.meta$type, fixed = TRUE)]<-"B-Cell"
+GSE24759.meta$type[grep("Mature NK cell", GSE24759.meta$type, fixed = TRUE)]<-"NK"
+GSE24759.meta$type[grep("Hematopoietic stem cell_CD133+", GSE24759.meta$type, fixed = TRUE)]<-"LT_HSC"
+GSE24759.meta$type[setdiff(grep("Monocyte", GSE24759.meta$type, fixed = TRUE), grep("Colony Forming Unit-Monocyte", GSE24759.meta$type, fixed = TRUE))]<-"Monocyte"
+GSE24759.meta$type[grep("Granulocyte (Neutrophil)", GSE24759.meta$type, fixed = TRUE)]<-"Granulocyte"
+GSE24759.meta$type[grep("Erythroid_CD34- CD71+ GlyA-", GSE24759.meta$type, fixed = TRUE)]<-"Nucleated Erythrocytes"
+
+GSE6506.meta$type<-c(rep("LT_HSC", 2),
+                rep("NK",2),
+                rep("CD4+_naive", 2),
+                rep("CD8+_naive", 2),
+                rep("CD4+_activated", 2),
+                rep("CD8+_activated", 2),
+                rep("B-Cell", 2),
+                rep("Monocyte", 2),
+                rep("Granulocyte", 2),
+                rep("Nucleated Erythrocytes", 2)
+                )
+
+CM<-matrix(c(0,1,2,1,0,1,2,1,0), ncol = 3)
+dimnames(CM) <- list(c(-1,0,1), c(-1,0,1))
+
+common.types<-levels(as.factor(GSE6506.meta$type))
+human.consensus<-sapply(common.types, function(x){
+    consensusFingerprint(GEO.fingerprint.matrix[,
+        GSE24759.meta$GSM[GSE24759.meta$type == x]],
+    threshold = threshold)
+    })
+mouse.consensus<-sapply(common.types, function(x){
+    consensusFingerprint(GEO.fingerprint.matrix[,
+        GSE6506.meta$GSM[GSE6506.meta$type == x]],
+    threshold = threshold)
+    })
+
+# try removing activated T-cells
+human.consensus<-human.consensus[,-c(2,4)]
+mouse.consensus<-mouse.consensus[,-c(2,4)]
+
+common.types<-common.types[-c(2,4)]
+common.consensus<-sapply(common.types, function(x){
+    consensusFingerprint(cbind(human.consensus[,grep(x, colnames(human.consensus), fixed = TRUE)],
+                               mouse.consensus[,grep(x, colnames(mouse.consensus), fixed = TRUE)]),
+    threshold = 0.99)
+    })
+
+colnames(human.consensus)<-paste(colnames(human.consensus), "human", sep = "_")
+colnames(mouse.consensus)<-paste(colnames(mouse.consensus), "mouse", sep = "_")
+
+human.dat<-phyDat(t(human.consensus), type = "USER", levels = c(-1,0,1))
+human.pis<-parsinfo(human.dat)
+human.informative<-rownames(human.consensus)[!(attr(human.dat, "index") %in% human.pis[,1])]
+
+mouse.dat<-phyDat(t(mouse.consensus), type = "USER", levels = c(-1,0,1))
+mouse.pis<-parsinfo(mouse.dat)
+mouse.informative<-rownames(mouse.consensus)[!(attr(mouse.dat, "index") %in% mouse.pis[,1])]
+
+human.unique<-rownames(human.consensus)[apply(human.consensus, 1, function(x){min(table(x)) == 1})]
+human.pathways<-union(human.informative, human.unique)
+
+mouse.unique<-rownames(mouse.consensus)[apply(mouse.consensus, 1, function(x){min(table(x)) == 1})]
+mouse.pathways<-union(mouse.informative, mouse.unique)
+
+common.dat<-phyDat(t(common.consensus), type = "USER", levels = c(-1,0,1))
+common.pis<-parsinfo(common.dat)
+common.informative<-rownames(common.consensus)[!(attr(common.dat, "index") %in% common.pis[,1])]
+
+common.var<-rownames(common.consensus)[apply(common.consensus, 1, sd) > 0]
+
+common.unique<-rownames(common.consensus)[apply(common.consensus, 1, function(x){min(table(x)) == 1})]
+
+common.var.dat<-phyDat(t(common.consensus[common.informative,]), type = "USER", levels = c(-1,0,1))
+
+common.consensus.pathways<-rownames(common.consensus)[apply(common.consensus, 1, sd) > 0]
+
+common.dist <- dist.hamming(common.dat)
+common.NJ.tree <- NJ(common.dist)
+common.p.tree<-pratchet(common.dat, k = 50,
+  method = "sankoff", cost = CM, trace = 0, np = 1)
+
+common.var.dist <- dist.hamming(common.var.dat)
+common.var.NJ.tree <- NJ(common.var.dist)
+common.var.p.tree<-pratchet(common.var.dat, k = 50,
+  method = "sankoff", cost = CM, trace = 0, np = 1)
+
+
+
+blood.dat <- phyDat(t(cbind(human.consensus, mouse.consensus)), type = "USER", levels = c(-1,0,1))
+blood.dist <- dist.hamming(blood.dat)
+# construct trees
+blood.NJ.tree <- NJ(blood.dist)
+# try extracting the pathways that vary across each lineage
+human.var<-rownames(human.consensus)[apply(human.consensus, 1, sd) > 0]
+mouse.var<-rownames(mouse.consensus)[apply(mouse.consensus, 1, sd) > 0]
+
+library(GMAfunctions)
+informatives<-intersection(common.informative, human.informative, mouse.informative)
+uniques<-intersection(common.unique, human.unique, mouse.unique)
+
+informatives.all<-unionMulti(common.informative, human.informative, mouse.informative)
+
+#near.equal.row<-vector("logical", nrow(human.consensus))
+equal.row<-vector("logical", nrow(human.consensus))
+for (i in 1:nrow(human.consensus)){
+  equal.row[i]<-sum(human.consensus[i,] == mouse.consensus[i,]) == ncol(human.consensus)
+  }
+
+
+all.equal.pathways<-rownames(human.consensus)[rowSums((human.consensus == mouse.consensus)) == ncol(human.consensus)]
+
+test<-common.consensus.pathways
+test<-union(uniques, informatives)
+test<-all.equal.pathways
+test<-intersect(informatives.all, common.consensus.pathways)
+test<-common.informative
+test<-intersection(common.var, human.informative, mouse.informative)
+
+
+signif.pathways1<-intersection(common.informative, human.informative, mouse.informative)
+signif.pathways2<-intersection(human.informative, mouse.informative)
+similar<-rownames(human.consensus)[rowSums(human.consensus == mouse.consensus) > 4]
+test<-union(informatives, similar)
+test<-union(common.var, similar)
+test.5<-union(similar, signif.pathways1)
+test.6<-intersect(similar, common.informative)
+test.7<-intersect(similar, signif.pathways1)
+length(test.7)
+
+
+blood.var.dat <- phyDat(t(cbind(human.consensus, mouse.consensus)[test.6,]), type = "USER", levels = c(-1,0,1))
+blood.var.dist <- dist(t(cbind(human.consensus, mouse.consensus)[test.6,]))
+blood.var.NJ.tree<-nj(blood.var.dist)
+plot(blood.var.NJ.tree)
+model<-cbind(human.consensus, human.consensus)
+colnames(model)<-c(colnames(human.consensus),colnames(mouse.consensus))
+model.dat <- phyDat(t(model), type = "USER", levels = c(-1,0,1))
+model.tree<-NJ(dist.hamming(model.dat))
+# construct trees
+CM<-matrix(c(0,1,2,1,0,1,2,1,0), ncol = 3)
+dimnames(CM) <- list(c(-1,0,1), c(-1,0,1))
+
+blood.var.NJ.tree <- NJ(blood.var.dist)
+blood.p.tree<-pratchet(blood.var.dat,
+                       #start = model.tree,
+                       start = blood.var.NJ.tree,
+                       #start = blood.parsimony.top,
+                       k = 50,
+  method = "sankoff", cost = CM, trace = 1, np = 1)
+plot(blood.p.tree)
+plot(root(blood.p.tree,7))
+plot(root(blood.p.tree,5))
+
+blood.parsimony.boot <- bootstrap.phyDat(
+  blood.var.dat, bs = 100, pratchet,
+  #start = model.tree,
+  start = blood.var.NJ.tree,
+  k = 100,
+  method = "sankoff", cost = CM, trace = 0, np = 1, all = TRUE)
+
+# Combine multiple bootstrap trees
+blood.parsimony.boot<-c(
+  blood.parsimony.boot[
+    lapply(blood.parsimony.boot, class) == "phylo"
+    ],
+  unlist(blood.parsimony.boot[
+    lapply(blood.parsimony.boot, class) == "multiPhylo"
+    ],
+         recursive = FALSE)
+  )
+
+# Convert to cladewise ordering of edges
+blood.parsimony.boot<-lapply(blood.parsimony.boot, reorder, "cladewise")
+class(blood.parsimony.boot)<-"multiPhylo"
+
+# Create consensus tree
+blood.parsimony.consensus<-consensus(blood.parsimony.boot, p = 0.5)
+
+# Calculate bootstrap scores
+blood.parsimony.consensus$node.label<-round((100*prop.clades(
+  blood.parsimony.consensus, blood.parsimony.boot)
+                      )/length(blood.parsimony.boot))
+
+
+for (i in 1:length(blood.parsimony.boot)){
+  blood.parsimony.boot[[i]]$node.label<-(100*prop.clades(
+    blood.parsimony.boot[[i]], blood.parsimony.boot)
+                      )/length(blood.parsimony.boot)
+}
+@
+We can now either select the tree with highest summed bootstrap scores or the best parsimony scores. Here we will use the best parsimony score. These trees will be rooted 
+<<selectBootstrap>>=
+blood.bootstrap.scores<-data.frame(
+  pScore = sapply(blood.parsimony.boot, attr, "pscore"),
+  sumBoot = sapply(blood.parsimony.boot, function(x){
+    sum(x$node.label)
+    })
+  )
+
+# Show top ordered trees
+head(blood.bootstrap.scores[
+  order(blood.bootstrap.scores$pScore, -blood.bootstrap.scores$sumBoot),
+  ])
+head(blood.bootstrap.scores[
+  order(blood.bootstrap.scores$sumBoot, decreasing = TRUE),
+  ])
+
+blood.parsimony.top<-blood.parsimony.boot[[
+  order(blood.bootstrap.scores$pScore, -blood.bootstrap.scores$sumBoot)[1]
+  ]]
+blood.parsimony.top$node.label<-round(blood.parsimony.top$node.label)
+
+# Root trees to HSC
+
+
+#try(blood.parsimony.top<-root(
+#    blood.parsimony.top, "LT_HSC_human", resolve.root = TRUE))
+#try(GSE24759.parsimony.consensus<-root(
+#    GSE24759.parsimony.consensus, 21, resolve.root = TRUE))
+
+@
+<<plotGSE24759parsimony, include = FALSE>>=
+plot(blood.parsimony.top, show.node.label = FALSE, label.offset = 1)
+nodelabels(blood.parsimony.top$node.label, bg = "white", cex = 0.75)
+@
+<<plotGSE24759parsimonyConsensus, include = FALSE>>=
+plot(blood.parsimony.consensus, show.node.label = FALSE, label.offset = 1)
+nodelabels(blood.parsimony.consensus$node.label, bg = "white", cex = 0.75)
+@
+blood.parsimony.consensus1<-blood.parsimony.consensus
+blood.parsimony.top1<-blood.parsimony.top
+write.tree(blood.parsimony.consensus, file = "blood.parsimony.consensus.tree")
+write.tree(blood.parsimony.top, file = "blood.parsimony.top.tree")
+
+<<plot>>=
+library(pheatmap)
+order<-c(7,17,4,2,1,11,15,13,19,12,14,3,5,9,20,10,8,18,16,6)
+#8,10,18,16,20,6,9,19,11,1,15,5,13,3,4,14,2,12)
+map<-pheatmap(cbind(human.consensus, mouse.consensus)[test.7,order], cluster_cols = FALSE,
+show_rownames = T, show_colnames = T, col = c("blue", "white", "red"), 
+cellwidth = 17, cellheight = 6, fontsize = 8, srt = 45
+
+)
+map<-heatmap(cbind(human.consensus, mouse.consensus)[test.7,order]
+@

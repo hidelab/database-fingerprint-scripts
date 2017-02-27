@@ -1,0 +1,272 @@
+\documentclass{article}
+\usepackage{Sweave}
+\SweaveOpts{keep.source=TRUE}
+\begin{document}
+\title{Pathway fingerprinting evalutation of Mahalanobis distance - hpc111 version}
+\author{Gabriel Altschuler}
+\maketitle
+In this document the usefulness of the Mahalanobis distance will be assessed within the context of the R package \verb@pathprint@. We will use the \verb@pathprint.v.0.3.beta2@ build in this session. In addition, we will make use of the tissue samples curated in \emph{Zilliox and Irizarry. A gene expression bar code for microarray data. Nat Meth (2007) vol. 4 (11) pp. 911-3}, a set of arrays from 6 tissues; muscle, lung, spleen, kidney, liver and brain. We also use the raw Probability of Expression (POE) matrix produced in the construction of the fingerprint, as well as a covariance matrix build using an equivalent collection of random gene sets. These are held on the shared drive of \verb@hpc111@. This last dataset is not on the shared drive but can be requested from the author. If this is found to be informative it will be included into the next fingerprint build.
+\\ First we need to source the pathprint package and load the data libraries containing the fingerprint and the metadata. We will also load the tissue-specific data from a local file from the shared directory on \verb@hpc111@. A simple nearest-neighbor approach is used to identify the closest human array to each mouse array.
+<<loadData>>=
+library(pathprint.v0.3.beta2)
+load("/data/shared/Fingerprint/v0.3_.POE.matrix.2011-06-23.RData")
+load("/data/shared/Fingerprint/pathprint.v0.3.gs.cov.RData")
+barcode.meta<-read.delim(
+    "/data/shared/Fingerprint/curatedCellTypes/barcode_figure2_data.txt",
+    stringsAsFactors = FALSE)
+data(GEO.metadata.matrix)
+barcode.meta<-barcode.meta[barcode.meta$DB_ID %in% GEO.metadata.matrix$GSM,]
+full.matrix<-POE.matrix[, barcode.meta$DB_ID]
+rm(POE.matrix)
+full.class<-barcode.meta$Tissue
+names(full.class)<-barcode.meta$DB_ID
+@
+Now we define a precision recall test using a variety of distance metrics. The Mahalanobis distance is defined using the covariance matrix
+<<precisionRecall_function>>=
+precisionRecall<-function(
+  testMatrix, recallMatrix, testClass, recallClass,
+  method = "manhattan", cov = diag(nrow(recallMatrix))
+    )
+  # Calculate precision and recall based on rank of distance pairs
+  {
+    # check values
+    if (!(all.equal(colnames(testMatrix), names(testClass)))
+        ) stop("Check test matrix and class should names match")
+    if (!(all.equal(colnames(recallMatrix), names(recallClass)))
+        ) stop("Recall matrix and class names should match")        
+    # define an object to hold the ranked lists
+    ordered<-vector("list", ncol(testMatrix))
+    for (i in 1:ncol(testMatrix)){
+      # rank by distance or correlation
+      if (method == "manhattan"){
+      ordered[[i]] <- sort(colSums(abs(apply(recallMatrix,
+                          2,
+                          function(x){x - testMatrix[,i, drop = FALSE]}
+                          ))))
+        }
+      else if (method == "euclidean"){
+      ordered[[i]] <- sort(colSums(abs(apply(recallMatrix,
+                          2,
+                          function(x){(x - testMatrix[,i, drop = FALSE])^2}
+                          ))))
+        }
+      else if (method == "mahalanobis"){
+      ordered[[i]] <- sort(mahalanobis(t(recallMatrix),testMatrix[,1,drop = FALSE],
+                                cov = cov))
+        }  
+      else if (method == "spearman"){
+      ordered[[i]] <- sort(cor(testMatrix[,i, drop = FALSE], recallMatrix,
+                                method = "spearman")[1,],
+                      decreasing = TRUE)
+        }
+        
+      # set names as correct or incorrectly matched
+      names(ordered[[i]])<-(recallClass[
+                              names(ordered[[i]])
+                                      ] == testClass[i])
+      }
+  # compile list from all samples 
+  if (method %in% c("manhattan", "euclidean", "mahalanobis")){
+    ordered.all<-sort(unlist(ordered))
+  }
+  else if (method == "spearman"){
+    ordered.all<-sort(unlist(ordered), decreasing = TRUE)
+  }
+  logical.ordered<-as.logical(names(ordered.all))
+  # define precision and recall
+  recall<-cumsum(logical.ordered)/sum(logical.ordered)
+  precision<-cumsum(logical.ordered)/(1:length(logical.ordered))
+  precision.recall<-data.frame(recall = recall, precision = precision)
+  return(precision.recall)
+  }
+
+@
+<<PRsamples_euclidean>>=  
+# run over 15 cores
+library(multicore)
+library(doMC)
+registerDoMC(cores = 15)
+PR.samples.euclidean<-invisible(foreach (i = 1:ncol(full.matrix)) %dopar% {
+ PR <- precisionRecall(
+  testMatrix = full.matrix[,i, drop = FALSE],
+  recallMatrix = full.matrix[,-i],
+  testClass = full.class[i],
+  recallClass = full.class[-i],
+  method = "euclidean"
+  )
+  PR.samples<-approx(
+                x = PR$recall,
+                y = PR$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+    })
+PR.samples.euclidean<-rowMeans(as.data.frame(PR.samples.euclidean))
+@
+<<PRsamples_manhattan>>=  
+PR.samples.manhattan<-invisible(foreach (i = 1:ncol(full.matrix)) %dopar% {
+ PR <- precisionRecall(
+  testMatrix = full.matrix[,i, drop = FALSE],
+  recallMatrix = full.matrix[,-i],
+  testClass = full.class[i],
+  recallClass = full.class[-i],
+  method = "manhattan"
+  )
+  PR.samples<-approx(
+                x = PR$recall,
+                y = PR$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+    })
+PR.samples.manhattan<-rowMeans(as.data.frame(PR.samples.manhattan))
+@
+<<PRsamples_mahalanobis>>=  
+PR.samples.mahalanobis<-invisible(foreach (i = 1:ncol(full.matrix)) %dopar% {
+ PR <- precisionRecall(
+  testMatrix = full.matrix[,i, drop = FALSE],
+  recallMatrix = full.matrix[,-i],
+  testClass = full.class[i],
+  recallClass = full.class[-i],
+  method = "mahalanobis",
+  cov = pathprint.v0.3.gs.cov
+  )
+  PR.samples<-approx(
+                x = PR$recall,
+                y = PR$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+    })
+PR.samples.mahalanobis<-rowMeans(as.data.frame(PR.samples.mahalanobis))
+@
+\begin{figure}
+\begin{center}
+<<label=PRsamplesAllplot,fig=TRUE,echo = TRUE>>=
+plot.new()
+axis(1, seq(0,1,0.2))
+axis(2, seq(0,1,0.2))
+title(xlab = "recall", ylab = "precision")
+lines(x = seq(0.01, 1, 0.01), y = PR.samples.euclidean, col = "blue")
+lines(x = seq(0.01, 1, 0.01), y = PR.samples.manhattan, col = "green")
+lines(x = seq(0.01, 1, 0.01), y = PR.samples.mahalanobis, col = "red")
+
+legend(0.5,0.35, c("euclidean", "manhattan",
+                   "mahalanobis"),
+        text.col = c("blue", "green", "red"), bty= "n")
+
+@
+\end{center}
+\caption{Precision-recall curves for aggregated data}
+\label{fig:PRsamples}
+\end{figure}
+Now we will compare the results when using Mahalanobis distances based on the thresholded matrix
+<<ternaryThreshold>>=
+ternaryThreshold <- function(matrix, threshold)
+  # function to convert a POE matrix to a thresholded matrix
+  {
+  high<-threshold
+  low<-(-threshold)
+  threshold.matrix<-(matrix>high)-(matrix<low)
+  threshold.matrix[is.na(threshold.matrix)]<-0
+  return(threshold.matrix)
+  }
+@
+<<PRsamplesThresholdManhattan>>=
+PR.samples.threshold.manhattan<-invisible(foreach (j = 1:30) %dopar% {
+  n <- seq(0.25, 0.25*30, 0.25)[j]
+  threshold<-10^(-n)
+  full.threshold<-ternaryThreshold(full.matrix, threshold)
+  pr.sample.all<-matrix(nrow = 100, ncol = ncol(full.threshold))
+  colnames(pr.sample.all)<-colnames(full.threshold)
+  for (i in 1:ncol(full.threshold)){
+     PR <- precisionRecall(
+      testMatrix = full.threshold[,i, drop = FALSE],
+      recallMatrix = full.threshold[,-i],
+      testClass = full.class[i],
+      recallClass = full.class[-i],
+      method = "manhattan"
+      )
+    pr.sample.all[,i]<-approx(
+                x = PR$recall,
+                y = PR$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+    }
+  rowMeans(pr.sample.all)
+  })
+@
+<<PRsamplesThresholdMahalanobis>>=
+PR.samples.threshold.mahalanobis<-invisible(foreach (j = 1:30) %dopar% {
+  n <- seq(0.25, 0.25*30, 0.25)[j]
+  threshold<-10^(-n)
+  full.threshold<-ternaryThreshold(full.matrix, threshold)
+  pr.sample.all<-matrix(nrow = 100, ncol = ncol(full.threshold))
+  colnames(pr.sample.all)<-colnames(full.threshold)
+  for (i in 1:ncol(full.threshold)){
+     PR <- precisionRecall(
+      testMatrix = full.threshold[,i, drop = FALSE],
+      recallMatrix = full.threshold[,-i],
+      testClass = full.class[i],
+      recallClass = full.class[-i],
+      method = "mahalanobis",
+      cov = pathprint.v0.3.gs.cov
+      )
+    pr.sample.all[,i]<-approx(
+                x = PR$recall,
+                y = PR$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+    }
+  rowMeans(pr.sample.all)
+  })
+@
+<<PRsamplesThresholdEuclidean>>=
+PR.samples.threshold.euclidean<-invisible(foreach (j = 1:30) %dopar% {
+  n <- seq(0.25, 0.25*30, 0.25)[j]
+  threshold<-10^(-n)
+  full.threshold<-ternaryThreshold(full.matrix, threshold)
+  pr.sample.all<-matrix(nrow = 100, ncol = ncol(full.threshold))
+  colnames(pr.sample.all)<-colnames(full.threshold)
+  for (i in 1:ncol(full.threshold)){
+     PR <- precisionRecall(
+      testMatrix = full.threshold[,i, drop = FALSE],
+      recallMatrix = full.threshold[,-i],
+      testClass = full.class[i],
+      recallClass = full.class[-i],
+      method = "euclidean"
+      )
+    pr.sample.all[,i]<-approx(
+                x = PR$recall,
+                y = PR$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+    }
+  rowMeans(pr.sample.all)
+  })
+@
+\begin{figure}
+\begin{center}
+<<label=PRsamplesThresholdPlot,fig=TRUE,echo = TRUE>>=
+op<-par(mfrow = c(1,1), pty = "s")
+par(mfrow = c(5,6), mar = c(1,1,1,1))
+n <- seq(0.25, 0.25*30, 0.25)
+for (i in 1:30){
+  plot.new()
+  axis(1, seq(0,1,0.5))
+  axis(2, seq(0,1,0.5))
+  title(paste("10^", n[i], sep = ""))
+  lines(x = seq(0.01, 1, 0.01), y = PR.samples.threshold.euclidean[[i]], col = "blue")
+  lines(x = seq(0.01, 1, 0.01), y = PR.samples.threshold.manhattan[[i]], col = "green")
+  lines(x = seq(0.01, 1, 0.01), y = PR.samples.threshold.mahalanobis[[i]], col = "red")
+  }
+  par(op)
+@
+\end{center}
+\caption{Precision-recall curves for aggregated mouse to human tissues data based on a thresholded fingerprint build using \emph{Euclidean} (blue), \emph{Manhattan} (green) and \emph{Mahalanobis} distances (red)}
+\label{fig:PRsamplesRandom_plusPlot}
+\end{figure}
+\end{document}

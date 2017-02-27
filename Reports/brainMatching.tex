@@ -1,0 +1,113 @@
+\documentclass{article}
+\usepackage{Sweave}
+\usepackage{amsmath}
+\usepackage{amscd}
+\usepackage[tableposition=top]{caption}
+\usepackage{ifthen}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage[usenames]{color}
+\definecolor{midnightblue}{rgb}{0.098,0.098,0.439}
+\DefineVerbatimEnvironment{Sinput}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{midnightblue}}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{xleftmargin=2em}
+\DefineVerbatimEnvironment{Scode}{Verbatim}{xleftmargin=2em}
+\fvset{listparameters={\setlength{\topsep}{0pt}}}
+\renewenvironment{Schunk}{\vspace{\topsep}}{\vspace{\topsep}}
+
+\setkeys{Gin}{width=\textwidth}
+\begin{document}
+\title{Brain subtypes}
+\author{Gabriel Altschuler}
+\maketitle
+In this document we will test the ability of the fingerprint to pull out simliar arrays across brain-subtypes.
+\\ The required data and metadata is contained within the R package \verb@pathprint@. We will use the \verb@pathprint.v.0.3.beta4@ build in this session. 
+\\ First we need to source the pathprint package and load the data libraries containing the fingerprint and the metadata. We will also load the tissue-specific data from a local file from the shared directory on \verb@hpc111@.
+\begin{Schunk}
+\begin{Sinput}
+> library(pathprint.v0.3.beta4)
+> data(GEO.metadata.matrix)
+> humanBrain<-readLines(
+   "/Users/GabrielAltschuler/Documents/Projects/Fingerprinting/Brain/data/HumanBrian.txt"
+   )
+> humanBrain<-humanBrain[grep("GSM", humanBrain)]
+> HumanBrainSamples<-GEO.metadata.matrix[GEO.metadata.matrix$GSM %in% humanBrain,]
+> ratBrain<-readLines(
+   "/Users/GabrielAltschuler/Documents/Projects/Fingerprinting/Brain/data/RatBrain.txt"
+   )
+> ratBrain<-ratBrain[grep("GSM", ratBrain)]
+> RatBrainSamples<-GEO.metadata.matrix[GEO.metadata.matrix$GSM %in% ratBrain,]
+> mouseBrain<-readLines(
+   "/Users/GabrielAltschuler/Documents/Projects/Fingerprinting/Brain/data/mouseBrian.txt"
+   )
+> mouseBrain<-mouseBrain[grep("GSM", mouseBrain)]
+> MouseBrainSamples<-GEO.metadata.matrix[GEO.metadata.matrix$GSM %in% mouseBrain,]
+> brain.data<-rbind(MouseBrainSamples, HumanBrainSamples, RatBrainSamples)
+\end{Sinput}
+\end{Schunk}
+We will define a set of Brain types that we are interesting in using as classifiers
+\begin{Schunk}
+\begin{Sinput}
+> brainTypes<-c("Caudate Nucleus", "Cerebellum", "Frontal Cortex", "substantia nigra", "Hypothalamus", "pituitary", "amygdala", "hippocampus", "putamen", "pineal")
+> brain.data$Type<-NA
+> for (i in brainTypes){
+   ID<-grep(i, apply(
+               brain.data[, c("Title", "Source", "Characteristics")],
+               1, function(y){
+                         paste(y, collapse = " ")
+                         }
+                     ), ignore.case = TRUE)
+   
+   if(sum(!(is.na(brain.data$Type[ID]))) > 0) print(
+     list(a = paste("double assignment for tissue", i, "at "),
+          b = brain.data[ID, "GSM"][!(is.na(brain.data$Type[ID]))]))
+   brain.data$Type[ID][!is.na(brain.data$Type[ID])] <- NA
+   brain.data$Type[ID][is.na(brain.data$Type[ID])] <- i
+   }
+\end{Sinput}
+\begin{Soutput}
+$a
+[1] "double assignment for tissue hippocampus at "
+
+$b
+[1] "GSM53302" "GSM53303" "GSM53304" "GSM53308" "GSM53309"
+[6] "GSM53310"
+\end{Soutput}
+\begin{Sinput}
+> brainTypes.table<-as.data.frame(table(brain.data$Type), stringsAsFactors = FALSE)
+> colnames(brainTypes.table)<-c("Type", "n")
+> brainTypes.table$nMouse<-sapply(brainTypes.table$Type,
+       function(x){sum(grepl("Mus musculus", subset(brain.data,
+                                               Type == x)$Species))})
+> brainTypes.table$nRat<-sapply(brainTypes.table$Type,
+       function(x){sum(grepl("Rattus norvegicus", subset(brain.data,
+                                               Type == x)$Species))})
+> brainTypes.table$nHuman<-sapply(brainTypes.table$Type,
+       function(x){sum(grepl("Homo sapiens", subset(brain.data,
+                                               Type == x)$Species))})
+\end{Sinput}
+\end{Schunk}
+We will select sub-types that are represented by at least 2 arrays in each species. These will be used to construct a PCA to assess to what extent the different brain subtypes are distinguished relative to the species separation.
+% latex table generated in R 2.11.1 by xtable 1.5-6 package
+% Fri Jul 29 17:48:39 2011
+\begin{table}[tbp]
+\begin{center}
+\begin{tabular}{rlrrrr}
+  \hline
+ & Type & n & nMouse & nRat & nHuman \\ 
+  \hline
+1 & Caudate Nucleus & 147 &   0 &   0 & 147 \\ 
+  2 & Cerebellum & 214 &  50 &   2 & 162 \\ 
+  3 & Frontal Cortex & 200 &  41 &   0 & 159 \\ 
+  4 & Hypothalamus &  66 &  20 &  13 &  33 \\ 
+  5 & amygdala & 168 &  20 & 135 &  13 \\ 
+  6 & hippocampus & 387 &  98 & 274 &  15 \\ 
+  7 & pineal &  26 &   0 &  26 &   0 \\ 
+  8 & pituitary & 128 &   6 &  99 &  23 \\ 
+  9 & putamen &   9 &   0 &   0 &   9 \\ 
+  10 & substantia nigra &  25 &   0 &   0 &  25 \\ 
+   \hline
+\end{tabular}
+\caption{Brain types and curated arrays}
+\label{brainType}
+\end{center}
+\end{table}\end{document}

@@ -1,0 +1,31 @@
+\documentclass{article}
+\usepackage{Sweave}
+\usepackage{amsmath}
+\usepackage{amscd}
+\usepackage[tableposition=top]{caption}
+\usepackage{ifthen}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage[usenames]{color}
+\definecolor{midnightblue}{rgb}{0.098,0.098,0.439}
+\DefineVerbatimEnvironment{Sinput}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{midnightblue}}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{xleftmargin=2em}
+\DefineVerbatimEnvironment{Scode}{Verbatim}{xleftmargin=2em}
+\fvset{listparameters={\setlength{\topsep}{0pt}}}
+\renewenvironment{Schunk}{\vspace{\topsep}}{\vspace{\topsep}}
+\usepackage{lscape}
+
+\begin{document}
+\input{tissueMatching_pathprint-concordance}
+\title{Matching arrays using the pathway fingerprint}
+\author{Gabriel Altschuler}
+\maketitle
+In this document we will test the ability of the pathway fingerprint to pull out simliar arrays across platforms and species in the GEO corpus.
+\\ The required data and metadata is contained within the R package \verb@pathprint@. In addition, we will make use of the tissue samples curated in \emph{Zilliox and Irizarry. A gene expression bar code for microarray data. Nat Meth (2007) vol. 4 (11) pp. 911-3}, a set of arrays from 6 tissues; muscle, lung, spleen, kidney, liver and brain.
+\\ First we need to source the pathprint package and load the data libraries containing the fingerprint and the metadata. We will also load the tissue-specific data from a local file.
+\begin{Schunk}
+\begin{Sinput}
+> library(pathprint)
+> tissue.meta<-read.delim(
++   "/data/shared/Fingerprint/curatedCellTypes/barcode_figure2_data.txt",
++   stringsAsFactors = FALSE)

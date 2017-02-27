@@ -1,0 +1,84 @@
+\documentclass{article}
+\usepackage{Sweave}
+\SweaveOpts{keep.source=TRUE}
+\begin{document}
+\title{Pathway fingerprinting tissue MST - pathprint v0.3 beta4 - hpc111 version}
+\author{Gabriel Altschuler}
+\maketitle
+
+In this document we will address the question of inter vs intra tissue distances. This is also dealt with to a large extent in the document \emph{Benchmarking the pathway fingerprint - hpc111 version}.
+\\ Much of the required data and metadata is contained within the R package \verb@pathprint@. We will use the \verb@pathprint.v.0.3.beta@ build in this session. In addition, we will make use of the tissue samples curated in \emph{Zilliox and Irizarry. A gene expression bar code for microarray data. Nat Meth (2007) vol. 4 (11) pp. 911-3}, a set of arrays from 6 tissues; muscle, lung, spleen, kidney, liver and brain. We also use the raw Probability of Expression (POE) matrix produced in the construction of the fingerprint. This is held on the shared drive of \verb@hpc111@, as well as a POE matrix build using an quivalent collection of random gene sets. This last dataset is not on the shared drive but can be requested from the author.
+\\ First we need to source the pathprint package and load the data libraries containing the fingerprint and the metadata. We will also load the tissue-specific data from a local file from the shared directory on \verb@hpc111@. A simple nearest-neighbor approach is used to identify the closest human array to each mouse array.
+<<data>>=
+# load fingerprint data
+library(pathprint.v0.3.beta4)
+data(GEO.fingerprint.matrix)
+# if on hcp111
+barcode.meta<-read.delim(
+    "/data/shared/Fingerprint/curatedCellTypes/barcode_figure2_data.txt",
+    stringsAsFactors = FALSE)
+
+# else, if on local
+#barcode.meta<-read.delim(
+#  "/Users/GabrielAltschuler/Documents/Projects/Fingerprinting/barcode/output/barcode_figure2_data.txt",
+#    stringsAsFactors = FALSE)
+
+barcode.meta<-barcode.meta[barcode.meta$DB_ID %in% colnames(GEO.fingerprint.matrix),]
+barcode.fingerprint<-GEO.fingerprint.matrix[,barcode.meta$DB_ID]
+# now load barcode data
+load("/data/shared/Fingerprint/misc/barcode.matrix.RData")
+barcode.matrix<-barcode.matrix[,barcode.meta$DB_ID]
+
+(tissues<-levels(as.factor(barcode.meta$Tissue)))
+@
+Now we can use the Manhattan distance between each array to construct a 2D network. N.B. this runs using a hacked version of igraph to allow plotting of diamonds in addition to squares and circles 
+<<graph>>=
+library(igraph, lib.loc = .libPaths()[3])
+fingerprint.dist<-as.matrix(dist(t(barcode.fingerprint), method = "manhattan"))
+fingerprint.g<-graph.adjacency(fingerprint.dist, weighted = TRUE, diag = FALSE, mode = "upper")
+fingerprint.g.mst<-minimum.spanning.tree(fingerprint.g)
+barcode.dist<-as.matrix(dist(t(barcode.matrix), method = "manhattan"))
+barcode.g<-graph.adjacency(barcode.dist, weighted = TRUE, diag = FALSE, mode = "upper")
+barcode.g.mst<-minimum.spanning.tree(barcode.g)
+tissue.color<-rainbow(6)[as.factor(barcode.meta$Tissue)]
+platform.shape<-c("circle", "square", "diamond")[as.factor(barcode.meta$Platform)]
+@
+<<label=plotMST,include = FALSE>>=
+plot(fingerprint.g.mst, vertex.size=2, 
+      vertex.shape = platform.shape, vertex.color = tissue.color,
+      #vertex.label = barcode.meta$Platform, vertex.label.dist = 0.25, vertex.label.cex = 0.5,
+      vertex.label = NA,
+      layout = layout.kamada.kawai)
+# legend("bottomleft", levels(as.factor(as.factor(barcode.meta$Tissue))),
+#       text.col = rainbow(6)[1:6], cex = 2, bty = "n")
+# legend("bottomright",legend = levels(as.factor(barcode.meta$Platform)),
+#       pch = c(1,0,5), cex = 2, bty = "n")
+@
+<<label=plotMSTbarcode,include = FALSE>>=
+plot(barcode.g.mst, vertex.size=2, 
+      vertex.shape = platform.shape, vertex.color = tissue.color,
+      #vertex.label = barcode.meta$Platform, vertex.label.dist = 0.25, vertex.label.cex = 0.5,
+      vertex.label = NA,
+      layout = layout.kamada.kawai)
+# legend("bottomleft", levels(as.factor(as.factor(barcode.meta$Tissue))),
+#       text.col = rainbow(6)[1:6], cex = 2, bty = "n")
+# legend("bottomright",legend = levels(as.factor(barcode.meta$Platform)),
+#       pch = c(1,0,5), cex = 2, bty = "n")
+@
+\newpage
+\begin{figure}
+\begin{center}
+<<label=plotMSTplot,fig=TRUE,echo=FALSE>>=
+<<plotMST>>
+@
+\end{center}
+\caption{Minimal spanning tree for tissue set based on the pathway fingerprint, brain = red, kidney = yellow, liver = green, lung = light blue, muscle = dark blue, spleen = pink, GPL1261 = circles, GPL570 = diamonds, GPL96 = diamonds}
+\begin{center}
+<<label=plotMSTbarcodeplot,fig=TRUE,echo=FALSE>>=
+<<plotMSTbarcode>>
+@
+\end{center}
+\caption{Minimal spanning tree for tissue set based on the gene expression barcode fingerprint, key as above}
+\end{figure}
+
+\end{document}

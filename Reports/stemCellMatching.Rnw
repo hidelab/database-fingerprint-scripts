@@ -1,0 +1,701 @@
+\documentclass{article}
+\usepackage{Sweave}
+\usepackage{amsmath}
+\usepackage{amscd}
+\usepackage[tableposition=top]{caption}
+\usepackage{ifthen}
+\usepackage[utf8]{inputenc}
+\SweaveOpts{keep.source=TRUE, pdf.version=1.4, eps = FALSE}
+\begin{document}
+\title{Matching arrays to cancer stem cells using the pathway fingerprint - hpc111 version}
+\author{Gabriel Altschuler}
+\maketitle
+In this document we will use the fingerprint to \emph{phenotype match} arrays that are similiar to stem cells across platforms and species in the GEO corpus.
+\\ The required data and metadata is contained within the R package \verb@pathprint@. We will use the \verb@pathprint.v.0.3.beta3@ build in this session.
+\\ First we need to source the pathprint package and load the data libraries containing the fingerprint and the metadata.
+<<loadData>>=
+library(pathprint.v0.3.beta3)
+data(GEO.metadata.matrix)
+data(GEO.fingerprint.matrix)
+GSE.table<-table(GEO.metadata.matrix$GSE)
+GEO.metadata.matrix$GSEcount<-GSE.table[GEO.metadata.matrix$GSE]
+@
+Next we will load a curated pluripotent dataset from a local file on the shared directory on \verb@hpc111@ and subset for arrays included in the fingerprint
+<<loadSamples>>=
+load(
+ "/data/shared/Fingerprint/curatedCellTypes/cellTypes_collection.RData"
+    )
+cellTypes<-cellTypes[
+  cellTypes$GSM %in% colnames(GEO.fingerprint.matrix)
+  ,]
+(types<-levels(as.factor(cellTypes$Type)))
+@
+We can use the pre-calculated fingerprints to construct a consensus fingerprints for these cell types
+<<tissueConsensus>>=
+typeConsensus<-sapply(types, function(x){
+    consensusFingerprint(GEO.fingerprint.matrix[,
+        cellTypes$GSM[cellTypes$Type == x]],
+    threshold = 0.75)
+    })
+head(typeConsensus)
+@
+There are \Sexpr{sum(abs(typeConsensus[,"pluripotent"]))}, \Sexpr{sum(abs(typeConsensus[,"ES"]))} and \Sexpr{sum(abs(typeConsensus[,"iPS"]))} non-zero pathways in the consensus pluripotent, ES and iPS fingerprints respectively. We are now interested in plotting the distance from these signatures.
+<<typeDistance>>=
+typeDistance<-apply(typeConsensus, 2,
+        consensusDistance, GEO.fingerprint.matrix)
+@
+<<typesHist1, include=FALSE>>=
+par(mfcol = c(2,3))
+for(i in types){
+hist(typeDistance[[i]]$distance, breaks = seq(0,1,1/(2*sum(abs(typeConsensus[,i])))),
+     main = i)
+}
+@
+<<typesHist2, include=FALSE>>=
+par(mfcol = c(2,3))
+for (i in types){
+hist(typeDistance[[i]][cellTypes$GSM[cellTypes$Type == "ES"], "distance"], breaks = seq(0,1,1/(2*sum(abs(typeConsensus[,i])))),
+    col = "#FF000080", border = "#FF000020")
+hist(typeDistance[[i]][cellTypes$GSM[cellTypes$Type == "iPS"], "distance"], breaks = seq(0,1,1/(2*sum(abs(typeConsensus[,i])))),
+    col = "#00FF0080", border = "#00FF0020", add = TRUE)
+}
+@
+<<typesHist3, include = FALSE>>=
+par(mfcol = c(2,3))
+for (i in types){
+hist(typeDistance[[i]][cellTypes$GSM[cellTypes$Type == "melanoma"], "distance"], breaks = seq(0,1,1/(2*sum(abs(typeConsensus[,i])))),
+    col = "#0000FF80", border = "#0000FF20", main = i)
+hist(typeDistance[[i]][cellTypes$GSM[cellTypes$Type == "mesenchymal"], "distance"], breaks = seq(0,1,1/(2*sum(abs(typeConsensus[,i])))),
+    col = "#00FF0080", border = "#00FF0020", add = TRUE)
+hist(typeDistance[[i]][cellTypes$GSM[cellTypes$Type == "neuralCrest"], "distance"], breaks = seq(0,1,1/(2*sum(abs(typeConsensus[,i])))),
+    col = "#FF000080", border = "#FF000020", add = TRUE)
+}
+@
+\newpage
+\begin{figure}
+\begin{center}
+<<label=plottypesHist1,fig=TRUE,echo=FALSE>>=
+<<typesHist1>>
+@
+\end{center}
+\caption{Histograms of the distance from the cell type consensus fingerprints for all GEO samples}
+\label{fig:typeHist_1}
+\end{figure}
+\newpage
+\begin{figure}
+\begin{center}
+<<label=plottypesHist2,fig=TRUE,echo=FALSE>>=
+<<typesHist2>>
+@
+\end{center}
+\caption{Histograms of the distance from the cell type consensus fingerprints for ES (green) and iPS (red) and melanoma (blue) samples.}
+\label{fig:typeHist_2}
+\begin{center}
+<<label=plottypesHist3,fig=TRUE,echo=FALSE>>=
+<<typesHist3>>
+@
+\end{center}
+\caption{Histograms of the distance from the cell type consensus fingerprints for melanoma (blue), neural crest (green) and mesenchymal (red) samples.}
+\label{fig:typeHist_3}
+\end{figure}
+Figure~\ref{fig:typeHist_1}, figure~\ref{fig:typeHist_2} and figure~\ref{fig:typeHist_3} demonstrates the distribution of distances from consensus signatures across GEO and within the various curated sets. By mining the metadata we can start to investigate the annotations of the phyenotypically matched samples.
+<<defineTerms>>=
+ES.terms<-c("ESCs", "ESC", "Embryonic Stem", "ES cell", "ES line",
+            "embrionic stem cell")
+iPS.terms<-c("hiPS", "iPS", "iPSCs", "iPSC","induced pluripotent stem")
+melanoma.terms<-c("melanoma")
+mesenchymal.terms<-c("mesenchymal")
+neuralCrest.terms<-c("Neural Crest")
+pluripotent.terms<-c(ES.terms, iPS.terms, "pluripotent")
+ES.GSE<-c("GSE5141")
+iPS.GSE<-c()
+melanoma.GSE<-c()
+mesenchymal.GSE<-c()
+neuralCrest.GSE<-c()
+pluripotent.GSE<-c(ES.GSE, iPS.GSE)
+type.terms<-list(
+  ES.terms, iPS.terms, melanoma.terms, mesenchymal.terms,
+  neuralCrest.terms, pluripotent.terms
+    )
+type.GSE<-list(ES.GSE, iPS.GSE, melanoma.GSE, mesenchymal.GSE,
+                neuralCrest.GSE, pluripotent.GSE)
+names(type.terms)<-types
+names(type.GSE)<-types
+# add a pluripotent TRUE/FALSE (1/0) column to metadata
+  GEO.metadata.matrix$pluripotent<-(rowSums(
+  sapply(type.terms[["pluripotent"]], function(x){
+    grepl(x, apply(
+            GEO.metadata.matrix[, c("Title", "Source", "Characteristics")],
+            1, function(y){
+                      paste(y, collapse = " ")
+                      }
+                  ), ignore.case = TRUE)
+      })
+  ) > 0)
+
+  GEO.metadata.matrix$pluripotent[
+      GEO.metadata.matrix$GSE %in% type.GSE[["pluripotent"]]
+      ]<-1
+
+@
+<<bindMeta>>=
+typeDistance.meta<-lapply(types, function(x){
+  cbind(typeDistance[[x]],
+          GEO.metadata.matrix[
+            match(rownames(typeDistance[[x]]),
+            GEO.metadata.matrix$GSM)
+              ,])})
+names(typeDistance.meta)<-types
+@
+<<validMatches>>=
+for (i in types){
+  print(i)
+  typeDistance.meta[[i]]$valid<-(rowSums(
+  sapply(type.terms[[i]], function(x){
+    grepl(x, apply(
+            typeDistance.meta[[i]][, c("Title", "Source", "Characteristics")],
+            1, function(y){
+                      paste(y, collapse = " ")
+                      }
+                  ), ignore.case = TRUE)
+      })
+  ) > 0)
+  typeDistance.meta[[i]]$valid[
+      typeDistance.meta[[i]]$GSE %in% type.GSE[[i]]
+      ]<-1
+  }
+@
+\section{Cancers that are closely associated with the embryonic stem cell signature}
+The top 1000 arrays matching the pluripotent fingerprint were derived from 140 different human and mouse studies across 13 platforms. The majority, 873 arrays, are ES or iPS cell lines and other embryonal samples. The remaining samples are composed of a range of cancer cell lines from testicular, ovarian and small cell lung cancers, Ewing sarcomas, embryonal carcinomas, teratoma lines Susa and Ntera2, rhabdomyosarcomas and neuroblastomas, as well as a small number of neural progenitor cells and 1 fibroblast, which may represent a false positive or mis-curation. We will now attampt to demonstrate the relevance of an ES signal in these cancers.
+\\ The expO dataset is a wide study of cancer types. We will use it to give a braod overview of the distribution of distance to the ES signature with cancer type. The data is contained in GEO reference GSE2109 and contains over 2000 records across a broad range of cancer subtypes. Here will display a subset of the data with tissues represented by >20 samples
+<<expO>>=
+GSE2109.ES<-typeDistance.meta[["ES"]][typeDistance.meta[["ES"]]$GSE %in% "GSE2109",]
+GSE2109.ES$tissue<-sapply(GSE2109.ES$Title,
+            function(x){unlist(strsplit(x, split = " - "))[[1]]})
+GSE2109.ES$representedTissue<-(GSE2109.ES$tissue %in% 
+  names(table(GSE2109.ES$tissue)[table(GSE2109.ES$tissue) > 20]
+                              ))
+@
+<<expOplot, include=FALSE>>=
+par(15,5,5,5, cex = 0.75)
+boxplot(distance ~ tissue, data = GSE2109.ES,
+        subset = representedTissue == TRUE, las = 2
+        )
+@
+\begin{figure}
+\begin{center}
+<<label=plotexpOplot,fig=TRUE,echo=FALSE>>=
+<<expOplot>>
+@
+\end{center}
+\caption{Boxplot of the distance from a range of cancer types to the ES consensus fingerprint}
+\label{fig:expOplot_1}
+\end{figure}
+
+\subsection{Ovarian Cancer}
+The expression of stem cell programs in ovarian cancers is being increasingly recognized as being important in tumor pregressing and potential therapy (Curley et al. 2011). As shown in figure~\ref{fig:expOplot_1}, some ovarian cancers show a close association with ES cells, indicative of a stem cell expression in this cancer. An obvious counter-argument is that this is a tissue-specific effect. To test this we can use datasets profiling ovarian surface epithelia and ovarian cancer epithelial cells, GSE14407 and GSE27651.
+<<GSE14407>>=
+GSE14407.ES<-typeDistance.meta[["ES"]][
+  typeDistance.meta[["ES"]]$GSE %in% "GSE14407",]
+GSE14407.ES$class<-sapply(GSE14407.ES$Characteristics,
+            function(x){unlist(strsplit(x, split = "specimen: "))[[2]]})
+@
+<<GSE14407_plot, include=FALSE>>=
+par(mar = c(15,5,5,5), cex = 0.75)
+boxplot(distance ~ class, data = GSE14407.ES, las = 2,
+        main = "Ovarian cancer data - dist to ES consensus")
+@
+\begin{figure}
+\begin{center}
+<<label = plotGSE14407_plot, fig = TRUE, echo = FALSE>>=
+<<GSE14407_plot>>
+@
+\end{center}
+\caption{The distance to the ES consensus signature of twelve healthy ovarian surface epithelia samples compared to twelve laser capture microdissected serous ovarian cancer epithelia samples}
+\label{fig:GSE14407_plot_1}
+\end{figure}
+
+<<GSE27651>>=
+GSE27651.ES<-typeDistance.meta[["ES"]][
+  typeDistance.meta[["ES"]]$GSE %in% "GSE27651",]
+GSE27651.ES$class<-sapply(GSE27651.ES$Characteristics,
+            function(x){unlist(strsplit(x, split = "tissue: "))[[2]]})
+@
+<<GSE27651_plot, include=FALSE>>=
+par(mar = c(15,5,5,5), cex = 0.75)
+boxplot(distance ~ class, data = GSE27651.ES, las = 2,
+        main = "Ovarian cancer data - dist to ES consensus")
+@
+\begin{figure}
+\begin{center}
+<<label = plotGSE27651_plot, fig = TRUE, echo = FALSE>>=
+<<GSE27651_plot>>
+@
+\end{center}
+\caption{The distance to the ES consensus signature of 6 human ovarian surface epithelia (HOSE), 8 serous borderline ovarian tumors (SBOT), 13 low-grade serous ovarian carcinomas (LG), and 22 high-grade serous ovarian carcinomas (HG)}
+\label{fig:GSE27651_plot_1}
+\end{figure}
+We get a slightly strange result when comparing to a mouse model - seems to be in reverse to the expected trend - might require more analysis 
+<<GSE24789>>=
+GSE24789.ES<-typeDistance.meta[["ES"]][
+  typeDistance.meta[["ES"]]$GSE %in% "GSE24789",]
+GSE24789.ES$class<-sapply(GSE24789.ES$Title,
+            function(x){unlist(strsplit(x, split = ","))[[1]]})
+@
+<<GSE24789_plot, include=FALSE>>=
+par(mar = c(15,5,5,5), cex = 0.75)
+boxplot(distance ~ class, data = GSE24789.ES, las = 1,
+        main = "Ovarian cancer data - dist to ES consensus")
+@
+\begin{figure}
+\begin{center}
+<<label = plotGSE24789_plot, fig = TRUE, echo = FALSE>>=
+<<GSE24789_plot>>
+@
+\end{center}
+\caption{The distance to the ES consensus signature of MOSE early cell representing a pre-neoplastic, non-malignant stage, MOSE Intermediate cells representing a noeplastic, pre-invasive state, and MOSE Late cells representing a malignant, invasive stage (3 replicates each)}
+\label{fig:GSE24789_plot_1}
+\end{figure}
+It would be interesting to see whether there is also a correlation with survival data. We will test two ovarian cancer datasets.
+<<GSE26712_1>>=
+GSE26712.ES.full<-typeDistance.meta[["ES"]][
+  typeDistance.meta[["ES"]]$GSE %in% "GSE26712",]
+@
+<<GSE26712_plot1, include=FALSE>>=
+par(mar = c(15,5,5,5), cex = 0.75)
+boxplot(distance ~ Source, data = GSE26712.ES.full, las = 1,
+        main = "Ovarian cancer data - dist to ES consensus")
+@
+Now subset for cancer samples only
+<<GSE26712_2>>=
+GSE26712.ES<-GSE26712.ES.full[GSE26712.ES.full$Source ==
+        "Ovarian tumor",]
+GSE26712.ES$survival<-as.numeric(
+  sapply(GSE26712.ES$Characteristics,
+        function(x){unlist(strsplit(x, split = "survival years: "))[[2]]})
+                                )
+GSE26712.ES$status<-sapply(GSE26712.ES$Characteristics,
+        function(x){unlist(strsplit(x, split = "status: "))[[2]]})
+GSE26712.ES$status[grep("AWD", GSE26712.ES$status)]<-0
+GSE26712.ES$status[grep("NED", GSE26712.ES$status)]<-0
+GSE26712.ES$status[grep("DOD", GSE26712.ES$status)]<-1
+GSE26712.ES$status<-as.numeric(GSE26712.ES$status)
+GSE26712.ES$OptimalSurgery<-grepl("surgery outcome: Optimal",
+                                  GSE26712.ES$Characteristics)
+GSE26712.ES.opt<-GSE26712.ES[GSE26712.ES$OptimalSurgery,]
+GSE26712.ES.Subopt<-GSE26712.ES[!GSE26712.ES$OptimalSurgery,]
+#GSE26712.ES.opt$group<-kmeans(GSE26712.ES.opt$distance, 2)$cluster
+#GSE26712.ES.Subopt$group<-kmeans(GSE26712.ES.Subopt$distance, 2)$cluster
+GSE26712.ES.opt$group<-GSE26712.ES.opt$distance >
+          median(GSE26712.ES.opt$distance)
+GSE26712.ES.Subopt$group<-GSE26712.ES.Subopt$distance >
+          median(GSE26712.ES.Subopt$distance)
+library(survival)
+fit.opt<-survfit(Surv(survival, status) ~ group, data = GSE26712.ES.opt)
+fit.Subopt<-survfit(Surv(survival, status) ~ group, data = GSE26712.ES.Subopt)
+diff.opt<-survdiff(Surv(survival, status) ~ group, data = GSE26712.ES.opt)
+diff.Subopt<-survdiff(Surv(survival, status) ~ group, data = GSE26712.ES.Subopt)
+pval.opt<-signif((1 - pchisq(diff.opt$chisq, length(diff.opt$n) - 1)), 3)
+pval.Subopt<-signif((1 - pchisq(diff.Subopt$chisq, length(diff.Subopt$n) - 1)), 3)
+@
+<<GSE26712_plot2, include=FALSE>>=
+par(mfcol = c(1,2))
+plot(fit.opt, col = 1:3)
+legend("topright", c(paste("p-value =", pval.opt, sep = " ")),
+							bty = "n", lty = 1)
+plot(fit.Subopt, col = 1:3)
+legend("topright", c(paste("p-value =", pval.Subopt, sep = " ")),
+  						bty = "n", lty = 1)
+
+@
+
+\begin{figure}
+\begin{center}
+<<label = plotGSE26712_plot1, fig = TRUE, echo = FALSE>>=
+<<GSE26712_plot1>>
+@
+\end{center}
+\caption{The distance to the ES consensus signature of 185 primary ovarian tumors and 10 normal ovarian surface epithelium}
+\label{fig:GSE26712_plot_1}
+\begin{center}
+<<label = plotGSE26712_plot2, fig = TRUE, echo = FALSE>>=
+<<GSE26712_plot2>>
+@
+\end{center}
+\caption{Survival curves for optimally (left) and suboptimally (right) debulked patients with Ovarian cancer, stratified according to their distance from ES}
+\label{fig:GSE26712_plot_1}
+\end{figure}
+
+
+<<GSE19829>>=
+GSE19829.ES<-typeDistance.meta[["ES"]][
+  typeDistance.meta[["ES"]]$GSE %in% "GSE19829",]
+GSE19829.ES$survival<-sapply(GSE19829.ES$Characteristics,
+            function(x){unlist(strsplit(x, split = ";"))[[1]]})
+GSE19829.ES$survival<-as.numeric(
+  gsub("overall survival \\(months\\): ", "", GSE19829.ES$survival)
+       )
+GSE19829.ES$status<-sapply(GSE19829.ES$Characteristics,
+            function(x){unlist(strsplit(x, split = "survival \\(censored\\): "))[[2]]})
+GSE19829.ES$status<-as.numeric(grepl("1 ", GSE19829.ES$status))
+
+GSE19829.ES.GPL570<-GSE19829.ES[GSE19829.ES$GPL == "GPL570",]
+GSE19829.ES.GPL8300<-GSE19829.ES[GSE19829.ES$GPL == "GPL8300",]
+GSE19829.ES.GPL570$group<-kmeans(GSE19829.ES.GPL570$distance,c(0.2,0.8))$cluster
+GSE19829.ES.GPL8300$group<-kmeans(GSE19829.ES.GPL8300$distance,c(0.2,0.8))$cluster
+#GSE19829.ES.GPL570$group<-GSE19829.ES.GPL570$distance > 
+#          median(GSE19829.ES.GPL570$distance)
+#GSE19829.ES.GPL8300$group<-GSE19829.ES.GPL8300$distance > 
+#          median(GSE19829.ES.GPL8300$distance)
+
+
+
+fit.GPL570<-survfit(Surv(survival, status) ~ group, data = GSE19829.ES.GPL570)
+diff.GPL570<-survdiff(Surv(survival, status) ~ group, data = GSE19829.ES.GPL570)
+pval.GPL570<-signif((1 - pchisq(diff.GPL570$chisq, length(diff.GPL570$n) - 1)), 3)
+
+fit.GPL8300<-survfit(Surv(survival, status) ~ group, data = GSE19829.ES.GPL8300)
+diff.GPL8300<-survdiff(Surv(survival, status) ~ group, data = GSE19829.ES.GPL8300)
+pval.GPL8300<-signif((1 - pchisq(diff.GPL8300$chisq, length(diff.GPL8300$n) - 1)), 3)
+
+@
+<<GSE19829_plot1, include=FALSE>>=
+boxplot(distance ~ GPL, data = GSE19829.ES, las = 2)
+@
+<<GSE19829_plot2, include=FALSE>>=
+par(mfcol = c(1,2))
+plot(fit.GPL570, col = 1:3)
+legend("topright", c(paste("p-value =", pval.GPL570, sep = " ")),
+  						bty = "n", lty = 1)
+plot(fit.GPL8300, col = 1:3)
+legend("topright", c(paste("p-value =", pval.GPL8300, sep = " ")),
+    					bty = "n", lty = 1)
+@
+\begin{figure}
+\begin{center}
+<<label = plotGSE19829_plot1, fig = TRUE, echo = FALSE>>=
+<<GSE19829_plot1>>
+@
+\end{center}
+\caption{The distance to the ES consensus signature of 70 primary ovarian tumors across 2 platforms from the same dataset}
+\label{fig:GSE19829_plot1}
+\begin{center}
+<<label = plotGSE19829_plot2, fig = TRUE, echo = FALSE>>=
+<<GSE19829_plot2>>
+@
+\end{center}
+\caption{Survival curves for patients with Ovarian cancer, stratified according to their distance from ES on two platforms; GPL570 (right) and GPL8300 (left)}
+\label{fig:GSE19829_plot2}
+\end{figure}
+
+
+
+
+
+<<GSE18520_1>>=
+GSE18520.ES.full<-typeDistance.meta[["ES"]][
+  typeDistance.meta[["ES"]]$GSE %in% "GSE18520",]
+@
+<<GSE18520_plot1, include=FALSE>>=
+par(mar = c(15,5,5,5), cex = 0.5)
+boxplot(distance ~ Source, data = GSE18520.ES.full, las = 2,
+        main = "Ovarian cancer data - dist to ES consensus")
+@
+<<GSE18520_2>>=
+GSE18520.ES<-GSE18520.ES.full[GSE18520.ES.full$Source ==
+        "papillary serous ovarian adenocarcinoma",]
+GSE18520.ES$survival<-as.numeric(gsub("surv data: ", "",
+                           sapply(GSE18520.ES$Characteristics,
+            function(x){unlist(strsplit(x, split = ";\t"))[[4]]})))
+GSE18520.ES$group<-kmeans(GSE18520.ES$distance,c(0.2,0.5,0.8))$cluster
+
+GSE18520.ES$group<-GSE18520.ES$distance > 
+          0.5
+
+fit<-survfit(Surv(survival) ~ group, data = GSE18520.ES)
+diff<-survdiff(Surv(survival) ~ group, data = GSE18520.ES)
+pval<-signif((1 - pchisq(diff$chisq, length(diff$n) - 1)), 3)
+@
+<<GSE18520_plot2, include=FALSE>>=
+plot(fit, col = 1:3)
+legend("topright", c(paste("p-value =", pval, sep = " ")),
+    					bty = "n", lty = 1)
+@
+\begin{figure}
+\begin{center}
+<<label = plotGSE18520_plot1, fig = TRUE, echo = FALSE>>=
+<<GSE18520_plot1>>
+@
+\end{center}
+\caption{The distance to the ES consensus signature of 10 normal ovarian surface epithelium (OSE) brushings and 53 advanced stage, high-grade primary tumor specimens}
+\label{fig:GSE18520_plot_1}
+\begin{center}
+<<label = plotGSE18520_plot2, fig = TRUE, echo = FALSE>>=
+<<GSE18520_plot2>>
+@
+\end{center}
+\caption{Survival curves for patients with Ovarian cancer, stratified according to their distance from ES }
+\label{fig:GSE18520_plot_2}
+\end{figure}
+
+\subsection{Ewing Sarcoma}
+The "cell of origin" of Ewing's sarcoma has not yet been determined. It has been suggested that Ewing's sarcoma may arise from a neuronal precursor cell, from an epithelial cell, or perhaps from mesenchymal stem cells. As a first step, we will assess the distance from the ES signature.
+
+<<GSE12102>>=
+GSE12102.ES<-typeDistance.meta[["ES"]][
+  typeDistance.meta[["ES"]]$GSE %in% "GSE12102",]
+GSE12102.ES$class<-sapply(GSE12102.ES$Title,
+            function(x){unlist(strsplit(x, split = " \\("))[[1]]})
+@
+<<GSE12102_plot, include=FALSE>>=
+par(mar = c(15,5,5,5), cex = 0.75)
+boxplot(distance ~ class, data = GSE12102.ES, las = 2,
+        main = "Ewing sarcoma data - dist to ES consensus")
+@
+\begin{figure}
+\begin{center}
+<<label = plotGSE12102_plot, fig = TRUE, echo = FALSE>>=
+<<GSE12102_plot>>
+@
+\end{center}
+\caption{The distance to the ES consensus signature of 30 primary tumors of patients that were classified according to no evidence of diseaase (event-free), relapse, metastasis}
+\label{fig:GSE12102_plot_1}
+\end{figure}
+
+<<GSE25127>>=
+GSE25127.ES<-typeDistance.meta[["ES"]][
+  typeDistance.meta[["ES"]]$GSE %in% "GSE25127",]
+
+@
+<<GSE25127_plot, include=FALSE>>=
+library(beanplot)
+par(mar = c(15,5,5,5), cex = 0.75)
+boxplot(distance ~ Source, data = GSE25127.ES, las = 2,
+        main = "Ewing sarcoma data - dist to ES consensus")
+@
+\begin{figure}
+\begin{center}
+<<label = plotGSE25127_plot, fig = TRUE, echo = FALSE>>=
+<<GSE25127_plot>>
+@
+\end{center}
+\caption{The distance to the ES consensus signature of two Ewing Sarcoma cell lines, TC71 and TC32, were treated with solvent control or with mithramycin}
+\label{fig:GSE25127_plot_1}
+\end{figure}
+
+\subsection{Ependynomas}
+The next tumor type under study are Ependynomas
+<<GSE21687>>=
+GSE21687.ES<-typeDistance.meta[["ES"]][
+  typeDistance.meta[["ES"]]$GSE %in% "GSE21687",]
+
+@
+<<GSE21687_plot, include=FALSE>>=
+library(beanplot)
+par(mar = c(15,5,5,5), cex = 0.75)
+boxplot(distance ~ Source, data = GSE21687.ES, las = 2,
+        main = "Ependynoma data - dist to ES consensus")
+@
+\begin{figure}
+\begin{center}
+<<label = plotGSE21687_plot, fig = TRUE, echo = FALSE>>=
+<<GSE21687_plot>>
+@
+\end{center}
+\caption{The distance to the ES consensus signature of 83 human ependynoma primary tumors and 192 mouse tumors and cell lines}
+\label{fig:GSE21687_plot_1}
+\end{figure}
+
+\subsection{Neuroblastoma}
+
+<<GSE19274>>=
+GSE19274.ES<-typeDistance.meta[["ES"]][
+  typeDistance.meta[["ES"]]$GSE %in% "GSE19274",]
+GSE19274.ES$tissue<-sapply(GSE19274.ES$Characteristics, function(x){unlist(strsplit(x, split = ";\t"))[2]})
+GSE19274.ES$tissue[grepl("primary", GSE19274.ES$tissue)]<-"Primary"
+GSE19274.ES$tissue[grepl("cell", GSE19274.ES$tissue)]<-"Cell line"
+GSE19274.ES$risk<-sapply(GSE19274.ES$Characteristics, function(x){unlist(strsplit(x, split = ";\t"))[6]})
+GSE19274.ES$mycn<-sapply(GSE19274.ES$Characteristics, function(x){unlist(strsplit(x, split = ";\t"))[3]})
+
+@
+<<GSE19274_plot, include=FALSE>>=
+par(mfcol = c(1,2), cex = 0.75)
+boxplot(distance ~ tissue, data = GSE19274.ES,
+        las = 2, main = "Neuroblastomas - dist to ES consensus")
+boxplot(distance ~ mycn, data = GSE19274.ES[
+                      grep("Primary",GSE19274.ES$tissue),],
+        las = 2, main = "Neuroblastomas - dist to ES consensus")
+@
+\begin{figure}
+\begin{center}
+<<label = plotGSE19274_plot, fig = TRUE, echo = FALSE>>=
+<<GSE19274_plot>>
+@
+\end{center}
+\caption{The distance to the ES consensus signature of neuroblastoma primary tumors and cell lines}
+\label{fig:GSE19274_plot_1}
+\end{figure}
+
+<<GSE15583>>=
+GSE15583.ES<-typeDistance.meta[["ES"]][
+  typeDistance.meta[["ES"]]$GSE %in% "GSE15583",]
+GSE15583.ES$class<-sapply(GSE15583.ES$Characteristics, function(x){unlist(strsplit(x, split = "condition: "))[2]})
+@
+<<GSE15583_plot, include=FALSE>>=
+boxplot(distance ~ class, data = GSE15583.ES,
+        las = 2, main = "Neuroblastomas - dist to ES consensus")
+@
+\begin{figure}
+\begin{center}
+<<label = plotGSE15583_plot, fig = TRUE, echo = FALSE>>=
+<<GSE15583_plot>>
+@
+\end{center}
+\caption{The distance to the ES consensus signature of neuroblastoma cell lines under normoxic and hypoxic conditions}
+\label{fig:GSE15583_plot_1}
+\end{figure}
+
+\subsection{Small cell lung cancer}
+
+<<GSE15240>>=
+GSE15240.ES<-typeDistance.meta[["ES"]][
+  typeDistance.meta[["ES"]]$GSE %in% "GSE15240",]
+GSE15240.ES$class<-sapply(GSE15240.ES$Source, function(x){
+    unlist(strsplit(x, split = ":"))[1]})
+GSE15240.ES$class<-gsub("Small Cell Lung Cancer", "SCLC",
+                        GSE15240.ES$class)
+GSE15240.ES$class<-sapply(GSE15240.ES$class, function(x){
+    unlist(strsplit(x, split = " obtained "))[1]})
+
+
+@
+<<GSE15240_plot, include=FALSE>>=
+par(mar = c(15,5,5,5), cex = 0.75)
+boxplot(distance ~ class, data = GSE15240.ES,
+        las = 2, main = "Small Cell Lung Cancer - dist to ES consensus")
+@
+\begin{figure}
+\begin{center}
+<<label = plotGSE15240_plot, fig = TRUE, echo = FALSE>>=
+<<GSE15240_plot>>
+@
+\end{center}
+\caption{The distance to the ES consensus signature of laboratory models and primary tumors in Small Cell Lung Cancer}
+\label{fig:GSE15240_plot_1}
+\end{figure}
+
+\subsection{Rhabdomyosarcoma}
+
+<<GSE8840>>=
+GSE8840.ES<-typeDistance.meta[["ES"]][
+  typeDistance.meta[["ES"]]$GSE %in% "GSE8840",]
+GSE8840.ES$class<-sapply(GSE8840.ES$Source, function(x){
+    unlist(strsplit(x, split = ":"))[1]})
+GSE8840.ES$class<-gsub("Small Cell Lung Cancer", "SCLC",
+                        GSE8840.ES$class)
+GSE8840.ES$class<-sapply(GSE8840.ES$class, function(x){
+    unlist(strsplit(x, split = " obtained "))[1]})
+
+
+@
+<<GSE8840_plot, include=FALSE>>=
+par(mar = c(25,5,5,5), cex = 0.75)
+boxplot(distance ~ Title, data = GSE8840.ES,
+        las = 2, main = "Rhabdomyosarcoma - dist to ES consensus")
+@
+\begin{figure}
+\begin{center}
+<<label = plotGSE8840_plot, fig = TRUE, echo = FALSE>>=
+<<GSE8840_plot>>
+@
+\end{center}
+\caption{The distance to the ES consensus signature of laboratory models and primary tumors in 13 RMS cell lines}
+\label{fig:GSE8840_plot_1}
+\end{figure}
+
+<<GSE5816>>=
+GSE5816.ES<-typeDistance.meta[["ES"]][
+  typeDistance.meta[["ES"]]$GSE %in% "GSE5816",]
+GSE5816.ES$Source<-tolower(GSE5816.ES$Source)
+GSE5816.ES$Source[
+  grep("immort", GSE5816.ES$Source)
+  ]<-"immortalized bronchial epithelial cells"
+@
+<<GSE5816_plot, include=FALSE>>=
+par(mar = c(25,5,5,5), cex = 0.75)
+boxplot(distance ~ Source, data = GSE5816.ES,
+        las = 2, main = "Cancer types - dist to ES consensus")
+@
+\begin{figure}
+\begin{center}
+<<label = plotGSE5816_plot, fig = TRUE, echo = FALSE>>=
+<<GSE5816_plot>>
+@
+\end{center}
+\caption{The distance to the ES consensus signature of a cell line comparison}
+\label{fig:GSE5816_plot_1}
+\end{figure}
+
+
+\subsection{leukemia}
+
+
+<<GSE19069>>=
+GSE19069.ES<-typeDistance.meta[["ES"]][
+  typeDistance.meta[["ES"]]$GSE %in% "GSE19069",]
+GSE19069.ES$class<-sapply(GSE19069.ES$Title, function(x){
+    unlist(strsplit(x, split = ","))[1]})
+GSE19069.ES$class<-gsub("Small Cell Lung Cancer", "SCLC",
+                        GSE19069.ES$class)
+GSE19069.ES$class<-sapply(GSE19069.ES$class, function(x){
+    unlist(strsplit(x, split = " obtained "))[1]})
+
+
+@
+<<GSE19069_plot, include=FALSE>>=
+par(mar = c(25,5,5,5), cex = 0.75)
+boxplot(distance ~ class, data = GSE19069.ES,
+        las = 2, main = "Rhabdomyosarcoma - dist to ES consensus")
+@
+\begin{figure}
+\begin{center}
+<<label = plotGSE19069_plot, fig = TRUE, echo = FALSE>>=
+<<GSE19069_plot>>
+@
+\end{center}
+\caption{The distance to the ES consensus signature of laboratory models and primary tumors in 13 RMS cell lines}
+\label{fig:GSE19069_plot_1}
+\end{figure}
+
+\subsection{embryonal carcinoma}
+
+<<GSE26875>>=
+GSE26875.ES<-typeDistance.meta[["ES"]][
+  typeDistance.meta[["ES"]]$GSE %in% "GSE26875",]
+GSE26875.ES$class<-sapply(GSE26875.ES$Title, function(x){
+    unlist(strsplit(x, split = ","))[1]})
+
+
+@
+<<GSE26875_plot, include=FALSE>>=
+par(mar = c(25,5,5,5), cex = 0.75)
+boxplot(distance ~ class, data = GSE26875.ES,
+        las = 2, main = "Rhabdomyosarcoma - dist to ES consensus")
+@
+\begin{figure}
+\begin{center}
+<<label = plotGSE26875_plot, fig = TRUE, echo = FALSE>>=
+<<GSE26875_plot>>
+@
+\end{center}
+\caption{The distance to the ES consensus signature of laboratory models and primary tumors in 13 RMS cell lines}
+\label{fig:GSE26875_plot_1}
+\end{figure}
+
+
+
+
+
+\end{document}
+
+

@@ -1,0 +1,224 @@
+\documentclass{article}
+\usepackage{Sweave}
+\usepackage{amsmath}
+\usepackage{amscd}
+\usepackage[tableposition=top]{caption}
+\usepackage{ifthen}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage[usenames]{color}
+\definecolor{midnightblue}{rgb}{0.098,0.098,0.439}
+\DefineVerbatimEnvironment{Sinput}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{midnightblue}}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{xleftmargin=2em}
+\DefineVerbatimEnvironment{Scode}{Verbatim}{xleftmargin=2em}
+\fvset{listparameters={\setlength{\topsep}{0pt}}}
+\renewenvironment{Schunk}{\vspace{\topsep}}{\vspace{\topsep}}
+\SweaveOpts{keep.source=TRUE, pdf.version=1.4, concordance=TRUE, height=5, width=10, prefix.string=figs/}
+\setkeys{Gin}{width=\textwidth}
+\begin{document}
+\title{Assessing consensus threshold}
+\author{Gabriel Altschuler}
+\maketitle
+<<echo=FALSE>>=
+options(width=60)
+options(continue=" ")
+@
+In this document we will test the ability of the fingerprint to pull out simliar arrays across platforms and species in the GEO corpus using different consensus thresholds.
+\\ The required data and metadata is contained within the R package \verb@pathprint@. We will use the \verb@pathprint.v.0.3.beta4@ build in this session. In addition, we will make use of the tissue samples curated in \emph{Zilliox and Irizarry. A gene expression bar code for microarray data. Nat Meth (2007) vol. 4 (11) pp. 911-3}, a set of arrays from 6 tissues; muscle, lung, spleen, kidney, liver and brain.
+\\ First we need to source the pathprint package and load the data libraries containing the fingerprint and the metadata. We will also load the tissue-specific data from a local file from the shared directory on \verb@hpc111@.
+<<data>>=
+library(GMAfunctions)
+library(pathprint.v0.3.beta4)
+data(GEO.metadata.matrix)
+data(GEO.fingerprint.matrix)
+library(GEOmetadb)
+con <- dbConnect(SQLite(),
+  "/home/galtschu2/Documents/Databases/GEOmetadb/GEOmetadb.sqlite"
+    )
+###
+# on local mac
+#con <- dbConnect(SQLite(),
+#  "/Users/GabrielAltschuler/Documents/Databases/GEOmetadb/GEOmetadb.sqlite"
+#    )
+###
+gpl.species<-dbGetQuery(con, "select gpl, organism from gpl")
+gpl.name<-dbGetQuery(con, "select gpl, title from gpl")
+dbDisconnect(con)
+GEO.metadata.matrix$platformSpecies<-gpl.species$organism[
+  match(GEO.metadata.matrix$GPL, gpl.species$gpl)]
+GEO.metadata.matrix<-GEO.metadata.matrix[
+  GEO.metadata.matrix$Species == GEO.metadata.matrix$platformSpecies,]
+# remove "B" arrays
+GEO.metadata.matrix<-GEO.metadata.matrix[
+  !(GEO.metadata.matrix$GPL %in% c("GPL340", "GPL97")),]
+
+GEO.fingerprint.matrix<-GEO.fingerprint.matrix[,
+  colnames(GEO.fingerprint.matrix) %in% GEO.metadata.matrix$GSM]
+tissue.meta<-read.delim(
+  "/data/shared/Fingerprint/curatedCellTypes/barcode_figure2_data.txt",
+  stringsAsFactors = FALSE)
+# if on local
+#tissue.meta<-read.delim(
+#  "/Users/GabrielAltschuler/Documents/Projects/Fingerprinting/barcode/output/barcode_figure2_data.txt",
+#  stringsAsFactors = FALSE)
+tissue.meta<-tissue.meta[tissue.meta$DB_ID %in% colnames(GEO.fingerprint.matrix),]
+tissues<-levels(as.factor(tissue.meta$Tissue))
+@
+\section{Tissue consensus fingerprints}
+For each tissue, we will construct a "\emph{consensus fingerprint}", this is a pathway vector that contains \verb@1@ or \verb@-1@ at for pathways that have consistently high or low expression across all of the samples in the set and \verb@0@ otherwise, given a fractional threshold. This uses the pathprint functions \verb@consensusFingerprint@.
+<<tissueConsensus>>=
+thresholds<-seq(0.5, 0.95, 0.05)
+tissueConsensus<-vector("list", length(thresholds))
+names(tissueConsensus)<-paste("T", thresholds, sep = "_")
+tissueDistance<-tissueConsensus
+for (i in 1:length(tissueConsensus)){
+tissueConsensus[[i]]<-sapply(tissues, function(x){
+    consensusFingerprint(GEO.fingerprint.matrix[,
+        tissue.meta$DB_ID[tissue.meta$Tissue == x]],
+    threshold = thresholds[i])
+    })
+tissueDistance[[i]]<-apply(tissueConsensus[[i]], 2,
+        consensusDistance, GEO.fingerprint.matrix)
+}
+@
+\section{Precision-recall of matching arrays}
+Next step is to quantify this - or show top arrays matching in each species or platform. For example, how many brain samples are there with p<0.02. To do this we need to collect the metadata across the full corpus. This will be done in a rough way by collecting \emph{terms} or keywords related with specific tissues and seraching the source, chararcteristics and title for any of these \emph{terms}. The top 7500 arrays for each tissue were manually re-curated to ensure that the \emph{terms} set was appropriate. In addition, specific GSEs that had insufficient metadata to identify the source were individually examined. These were assigned on a case by case basis.
+
+<<defineTerms>>=
+brain.terms<-c(
+  "brain", "Amygdala", "Cortex","Lobe", "hippocamp",
+  "putamen", "hypothalamus", "Hypothlamus", "cerebellum", "Striatum",
+  "DLPFC", "cerebellum","medulla", "Gyrus",
+  "Glioblastoma", "Accumbens", "astrocytoma", "Medulloblastoma",
+  "oligodendrogliomas","cerebrum", "Ventral tegmental", "cerebrum",
+  "stria terminalis", "periaqueductal gray", "thalamus", "cerebellar",
+  "substantia_nigra", "Caudate", "ventral tegmental area",
+  "vestibular_nuclei_superior", "ventral_tegmental_area",
+  "Gloubus Pallidum", "Globus pallidus", "subthalamic_nucleus", "corpus_callosum",
+  "Substantia Nigra", "spinal", "nodose_nucleus", "corticotectal",
+  "Paraventricular", "cortical neurons", "pons", "callosal", "oculomotor nucleus",
+  "Lateral geniculate nucleus","pituitary_gland", "trigeminal_ganglia",
+  "dorsal_root_ganglia", "pars tuberalis", "neuroblastoma", "dorsal root ganglion",
+  "Supraoptic nucleus", "glioma", "astrocytes", "pineal gland",
+  "3ARS02080774b_globus_pallidus"
+               )
+brain.GSE<-c("GSE9443","GSE11100", "GSE15222", "GSE9566", "GSE13041", "GSE2817",
+             "GSE19402", "GSE4206","GSE17617", "GSE13353", "GSE4623", "GSE2547",
+             "GSE19332", "GSE6614")
+kidney.terms<-c("kidney", "renal", "glomerulus", "renal", "Papillary", "RCC")
+kidney.GSE<-c("GSE7869", "GSE5243", "GSE13065", "GSE5243", "GSE7869", "GSE1563")
+liver.terms<-c("liver", "hepatocellular", "hepatocyte", "Hepatic", "hepatocytes",
+               "s854 2dpf GFP+", "s854 3dpf GFP+", "s854 4dpf GFP+", "s854 6dpf GFP+",
+               "cholangiocarcinoma", "HepaRG")
+liver.GSE<-c("GSE6632", "GSE10493", "GSE6903", "GSE9012", "GSE4285", "GSE4740",
+             "GSE1088", "GSE1089", "GSE14712")
+lung.terms<-c("lung", "bronchus", "NSCLC", "Bronchial")
+lung.GSE<-c("GSE11056", "GSE11809", "GSE18083", "GSE7670", "GSE6135", "GSE4512",
+            "GSE21581")
+muscle.terms<-c(
+  "skeletal muscle", "Proximal muscle", "vastus lateralis", "Biceps Brachii",
+  "vastus laterlis", "Quadricep", "skeletal_muscle", "Paravertebral",
+  "Deltoid", "Rectus femoris", "triceps", "superior rectus", "Vastus Lateralus",
+  "Gastrocnemius", "Flexor carpi", "tibialis cranialis", "tibialis anterior",
+  "calf muscle", "carpi radialis brevis", "gracillus", "tibialis anterior muscle",
+  "gracilis", "latissimus dorsi", "Soleus muscle", "muscle", "Tongue", "heart",
+  "diaphragm", "Intestine", "atrial", "ventricular",  "Cardiac", "Ventricle",
+  "Cardiomyocytes", "Anterior tibialis")
+muscle.GSE<-c("GSM397580", "GSM397583", "GSE1551", "GSE1764", "GSE80", "GSE12580",
+              "GSE21610", "GSE897", "GSE3307", "GSE6970")
+spleen.terms<-c("spleen", "splen", "lymph")
+spleen.GSE<-c("GSE24350", "GSE6980", "GSE24350", "GSE16059", "GSM541854")
+tissue.terms<-list(
+  brain.terms, kidney.terms, liver.terms, lung.terms, muscle.terms, spleen.terms
+    )
+tissue.GSE<-list(brain.GSE, kidney.GSE, liver.GSE, lung.GSE, muscle.GSE, spleen.GSE)
+names(tissue.terms)<-tissues
+names(tissue.GSE)<-tissues
+@
+<<Quantification>>=
+tissueDistance.meta<-vector("list", length(tissueConsensus))
+for (i in 1:length(tissueDistance.meta)){
+print(i)
+  tissueDistance.meta[[i]]<-lapply(tissues, function(x){
+    cbind(tissueDistance[[i]][[x]],
+            GEO.metadata.matrix[
+              match(rownames(tissueDistance[[i]][[x]]),
+              GEO.metadata.matrix$GSM)
+                ,])})
+  names(tissueDistance.meta[[i]])<-tissues
+
+  for (j in 1:length(tissues)){
+print(j)
+    tissue<-tissues[j]
+    tissueDistance.meta[[i]][[tissue]]$valid<-(rowSums(
+    sapply(tissue.terms[[tissue]], function(x){
+      grepl(x, apply(
+              tissueDistance.meta[[i]][[tissue]][, c("Title", "Source", "Characteristics")],
+              1, function(y){
+                        paste(y, collapse = " ")
+                        }
+                    ), ignore.case = TRUE)
+        })
+    ) > 0)
+    tissueDistance.meta[[i]][[tissue]]$valid[
+        tissueDistance.meta[[i]][[tissue]]$GSE %in% tissue.GSE[[tissue]]
+        ]<-1
+    }
+}
+@
+We can use this to calculate the mean average precision and plot the data as a histogram of the distance overlayed with precision, or as percision-recall plots
+<<MeanAveragedPrecision>>=
+MAP<-vector("list", length(tissueConsensus))
+for (i in 1:length(MAP)){
+  MAP[[i]]<-sapply(tissues, function(x){
+  mean(
+    (cumsum(tissueDistance.meta[[i]][[x]]$valid)/(1:length(tissueDistance.meta[[i]][[x]]$valid)))[
+      (tissueDistance.meta[[i]][[x]]$valid == 1)
+      ])})
+}
+@
+\begin{figure}
+\begin{center}
+<<label=MAPplots, fig = TRUE, echo = TRUE>>=
+par(mfcol = c(2,3))
+for (i in tissues){
+  plot(thresholds, sapply(MAP, function(x){x[i]}),
+       xlab = "threshold", ylab = "MAP",
+       main = paste(i, " (",
+          sum(grepl(i, tissue.meta$Tissue)),
+          " samples,", 
+          length(unique(tissue.meta$ExperimentID[grep(i, tissue.meta$Tissue)])),
+          " studies)",
+          sep = "")
+       )
+}
+@
+\end{center}
+\caption{Plot of mean average precision against consensus fingerprint threshold}
+\label{fig:plot}
+\end{figure}
+\begin{figure}
+\begin{center}
+<<label=MAPvnPathwayPlots, fig = TRUE, echo = TRUE>>=
+par(mfcol = c(2,3))
+for (i in tissues){
+  plot(sapply(tissueConsensus, function(x){sum(abs(x[,i]))}),
+       sapply(MAP, function(x){x[i]}),
+       xlab = "nPathways", ylab = "MAP",
+       main = paste(i, " (",
+          sum(grepl(i, tissue.meta$Tissue)),
+          " samples,", 
+          length(unique(tissue.meta$ExperimentID[grep(i, tissue.meta$Tissue)])),
+          " studies)",
+          sep = "")
+       )
+}
+@
+\end{center}
+\caption{Plot of mean average precision against number of pathways in the consensus fingerprint}
+\label{fig:plot}
+\end{figure}
+
+
+
+\end{document}

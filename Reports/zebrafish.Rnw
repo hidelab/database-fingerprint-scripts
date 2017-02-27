@@ -1,0 +1,64 @@
+\documentclass{article}
+\usepackage{Sweave}
+\usepackage{amsmath}
+\usepackage{amscd}
+\usepackage[tableposition=top]{caption}
+\usepackage{ifthen}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage[usenames]{color}
+\definecolor{midnightblue}{rgb}{0.098,0.098,0.439}
+\DefineVerbatimEnvironment{Sinput}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{midnightblue}}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{xleftmargin=2em}
+\DefineVerbatimEnvironment{Scode}{Verbatim}{xleftmargin=2em}
+\fvset{listparameters={\setlength{\topsep}{0pt}}}
+\renewenvironment{Schunk}{\vspace{\topsep}}{\vspace{\topsep}}
+\SweaveOpts{keep.source=TRUE, pdf.version=1.4, eps = FALSE}
+\begin{document}
+\title{Analysis of zebrafish blood cell types}
+\author{Gabriel Altschuler}
+\maketitle
+<<echo=false>>=
+options(width=60)
+#options(SweaveHooks=list(fig=function()
+#      par(mar=c(1.1, 1.1, 1.1, 1.1)))
+#        )
+options(continue=" ")
+@
+In this document we will use the blood normal and leukemic lineages to demonstrate the use of the pathway fingerprint to construct phylogneies.
+\\ The required data and metadata is contained within the R package \verb@pathprint@. We will use the \verb@pathprint.v.0.3.beta3@ build in this session. The blood data that we will analyze comes from the HSCI Blood database and was highlighted as relevant by Yi Li. Markers have been used 
+to enrich for specific blood cell types during zebrafish embryonic development. Early timpoints yield primitive cell types while late timpoints yield definitive cell types. The markers used are CD41+, a marker for HSC at late time points, GATA+, a maker for MEP at early timepoints, and Lmo2+, a marker for CMP at early timepoints (and possibly for HSC at late timepoints). We will assume that the data was analyzed using the Affymetrix Zebrafish Genome Array, GPL1319. The first step is to load and fingerprint the data.
+<<data>>=
+library(GMAfunctions)
+library(pathprint.v0.3.beta4)
+dataPath<-"~/Documents/Projects/Zon/data/"
+zfish.data<-list(
+  gata1.10som = gct2exprs(gctfile=paste(dataPath, "7350.gct.txt", sep = "")),
+  gata1.10som.unsort = gct2exprs(gctfile=paste(dataPath, "7341.gct.txt", sep = "")),
+  lmo2.36h = gct2exprs(gctfile=paste(dataPath, "7618.gct.txt", sep = "")),
+  lmo2.35h = gct2exprs(gctfile=paste(dataPath, "7609.gct.txt", sep = "")),
+  lmo2.14som = gct2exprs(gctfile=paste(dataPath, "7598.gct.txt", sep = "")),
+  cd41.34h = gct2exprs(gctfile=paste(dataPath, "7143.gct.txt", sep = "")),
+  cd41.3d = gct2exprs(gctfile=paste(dataPath, "7007.gct.txt", sep = ""))
+  )
+zfish.fingerprint<-lapply(zfish.data,
+                          exprs2fingerprint,
+                          platform = "GPL1319",
+                          species = "Danio rerio"
+                          )
+zfish.fingerprint.frame<-zfish.fingerprint[[1]]
+for (i in 2:length(zfish.fingerprint)){
+  zfish.fingerprint.frame<-cbind(
+    zfish.fingerprint.frame, zfish.fingerprint[[i]])
+}
+colnames(zfish.fingerprint.frame)<-paste(
+  names(unlist(sapply(zfish.fingerprint, colnames))),
+  unlist(sapply(zfish.fingerprint, colnames)),
+  sep = "_")  
+@
+<<heatmap>>=
+heatmap(zfish.fingerprint.frame[!is.na(zfish.fingerprint.frame[,1]),])
+The next step is to replicate the blood analysis for the new pathprint package and integrate the zebrafish data wherever possible. 
+\section{Human blood lineage}
+An initial analysis will be on the human hematopoiesis data published in \emph{Novershtern et al. Densely Interconnected Transcriptional Circuits Control Cell States in Human Hematopoiesis. Cell (2011)}. This is contained within the GEO record GSE24759. First we need to source the pathprint package and load the data libraries.
+\\ The metadata can be extracted from the pathprint metadata matrix

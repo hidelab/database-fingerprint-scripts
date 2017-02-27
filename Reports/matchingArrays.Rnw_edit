@@ -1,0 +1,332 @@
+
+\documentclass{article}
+\usepackage{Sweave}
+\SweaveOpts{keep.source=TRUE}
+\begin{document}
+\title{Matching arrays using the pathway fingerprint - hpc111 version}
+\author{Gabriel Altschuler}
+\maketitle
+
+In this document we will test the ability of the fingerprint to pull out simliar arrays across platforms and species in the GEO corpus.
+\\ The required data and metadata is contained within the R package \verb@pathprint@. We will use the \verb@pathprint.v.0.3.beta@ build in this session. In addition, we will make use of the tissue samples curated in \emph{Zilliox and Irizarry. A gene expression bar code for microarray data. Nat Meth (2007) vol. 4 (11) pp. 911-3}, a set of arrays from 6 tissues; muscle, lung, spleen, kidney, liver and brain.
+\\ First we need to source the pathprint package and load the data libraries containing the fingerprint and the metadata. We will also load the tissue-specific data from a local file from the shared directory on \verb@hpc111@.
+<<data>>=
+library(pathprint.v0.3.beta2)
+data(GEO.metadata.matrix)
+data(GEO.fingerprint.matrix)
+wd<-getwd()
+library(GEOmetadb)
+setwd("/home/galtschu2/Documents/Databases/GEOmetadb")
+# on local
+#setwd("/Users/GabrielAltschuler/Documents/Databases/GEOmetadb/")
+con <- dbConnect(SQLite(), "GEOmetadb.sqlite")
+gpl.species<-dbGetQuery(con, "select gpl, organism from gpl")
+gpl.name<-dbGetQuery(con, "select gpl, title from gpl")
+dbDisconnect(con)
+setwd<-wd
+GEO.metadata.matrix$platformSpecies<-gpl.species$organism[
+  match(GEO.metadata.matrix$GPL, gpl.species$gpl)]
+GEO.metadata.matrix<-GEO.metadata.matrix[
+  GEO.metadata.matrix$Species == GEO.metadata.matrix$platformSpecies,]
+GEO.fingerprint.matrix<-GEO.fingerprint.matrix[,
+  colnames(GEO.fingerprint.matrix) %in% GEO.metadata.matrix$GSM]
+tissue.meta<-read.delim(
+  "/data/shared/Fingerprint/curatedCellTypes/barcode_figure2_data.txt",
+  stringsAsFactors = FALSE)
+# if on local
+#tissue.meta<-read.delim(
+#  "/Users/GabrielAltschuler/Documents/Projects/Fingerprinting/barcode/output/barcode_figure2_data.txt",
+#  stringsAsFactors = FALSE)
+colnames(tissue.meta)
+tissue.meta<-tissue.meta[tissue.meta$DB_ID %in% colnames(GEO.fingerprint.matrix),]
+(tissues<-levels(as.factor(tissue.meta$Tissue)))
+@
+For each tissue, we will construct a "\emph{consensus fingerprint}", this is a pathway vector that contains \verb@1@ or \verb@-1@ at for pathways that have consistently high or low expression across all of the samples in the set and \verb@0@ otherwise, given a fractional threshold. This uses the pathprint functions \verb@consensusFingerprint@,  We will initailly set the threshold to 0.75.
+<<tissueConsensus>>=
+tissueConsensus<-sapply(tissues, function(x){
+    consensusFingerprint(GEO.fingerprint.matrix[,
+        tissue.meta$DB_ID[tissue.meta$Tissue == x]],
+    threshold = 0.75)
+    })
+head(tissueConsensus)
+@
+We can now use the Manhattan distance as a measure of similiarity to each of these vectors for all of the arrays in the fingerprint corpus. The function \verb@consensusDistance@ is used to calculate the distances and approximate p-value.
+<<tissueDistance>>=
+tissueDistance<-apply(tissueConsensus, 2,
+        consensusDistance, GEO.fingerprint.matrix)
+@
+An alternative method is to use the mean fingerprint and calculate the distance from this
+<<tissueMean>>=
+tissueMean<-sapply(tissues, function(x){
+    rowMeans(GEO.fingerprint.matrix[,
+        tissue.meta$DB_ID[tissue.meta$Tissue == x]])
+    })
+head(tissueMean)
+@
+<<distance2>>=
+distance2<-function(meanFingerprint, fingerprintframe)
+  {
+  meanFingerprint<-as.vector(meanFingerprint)
+  if (length(meanFingerprint) != dim(fingerprintframe)[1]) stop("check nrows are equal")
+  sub<-fingerprintframe - meanFingerprint
+  print(dim(fingerprintframe))
+  print(dim(sub))
+  distance <- colSums(abs(sub), na.rm = TRUE)
+  max.distance <- sum(abs(meanFingerprint))+length(meanFingerprint)
+  print(paste("Scaling against max length,", max.distance))
+  scaled.distance <- distance/max.distance
+  sorted.scaled.distance <- sort(scaled.distance)
+  mean.dist <- mean(sorted.scaled.distance)
+  sd.dist <- sd(sorted.scaled.distance)
+  pvals <- pnorm(sorted.scaled.distance, mean = mean.dist, 
+      sd = sd.dist)
+  return(data.frame(distance = sorted.scaled.distance, pvalue = pvals))
+  }
+@
+<<tissueDistance2>>=
+tissueDistance1<-apply(tissueMean, 2,
+        distance2, GEO.fingerprint.matrix)
+@
+The status outputs indicate the maximum manhattan distance possible based on the number of scored pathways in each consensus.
+<<label=distHist,include=FALSE>>=
+# op<-par(mfrow = c(1,1), pty = "s")
+# par(mfcol = c(2,1))
+brain.dist.hist<-hist(tissueDistance$brain[,"distance"],
+    nclass = 50, xlim = c(0,1), main = "", xlab = "Scaled distance")
+kidney.dist.hist<-hist(tissueDistance$kidney[,"distance"],
+    nclass = 50, xlim = c(0,1), main = "", xlab = "Scaled distance")
+liver.dist.hist<-hist(tissueDistance$liver[,"distance"],
+    nclass = 50, xlim = c(0,1), main = "", xlab = "Scaled distance")
+lung.dist.hist<-hist(tissueDistance$lung[,"distance"],
+    nclass = 50, xlim = c(0,1), main = "", xlab = "Scaled distance")
+skeletalmuscle.dist.hist<-hist(tissueDistance$"skeletal muscle"[,"distance"],
+    nclass = 50, xlim = c(0,1), main = "", xlab = "Scaled distance")
+spleen.dist.hist<-hist(tissueDistance$spleen[,"distance"],
+    nclass = 50, xlim = c(0,1), main = "", xlab = "Scaled distance")
+
+@
+<<label=distHistsub,include=FALSE>>=
+hist(tissueDistance$brain[
+        tissue.meta$DB_ID[tissue.meta$Tissue == "brain"],
+        "distance"],
+    breaks = brain.dist.hist$breaks,
+    xlim = c(0,1), main = "", xlab = "Scaled distance")
+hist(tissueDistance$spleen[
+        tissue.meta$DB_ID[tissue.meta$Tissue == "lung"],
+        "distance"],
+    breaks = brain.dist.hist$breaks,
+    xlim = c(0,1), main = "", xlab = "Scaled distance")
+hist(tissueDistance$lung[
+        tissue.meta$DB_ID[tissue.meta$Tissue == "skeletal muscle"],
+        "distance"],
+    breaks = brain.dist.hist$breaks,
+    xlim = c(0,1), main = "", xlab = "Scaled distance")
+
+
+
+
+#par(op)
+@
+\newpage
+\begin{figure}
+\begin{center}
+<<label=distHistPlot,fig=TRUE,echo=FALSE>>=
+<<distHist>>
+@
+\end{center}
+\caption{Histograms of the distance from the brain consensus of all GEO samplesand the brain tissues that made up the consensus signature.}
+\begin{center}
+<<label=distHistsubPlot,fig=TRUE,echo=FALSE>>=
+<<distHistsub>>
+@
+\end{center}
+\caption{Histograms of the distance from the brain consensus of the brain tissues that made up the consensus signature.}
+\end{figure}
+Figure \ref{fig:hist} shows a histogram of the distances from the brain consensus for the full corpus and for the brain tissues that made up the signature. This can also be represented as a table. Or we can extract the top ranking arrays for a particular platform, e.g. what are the closest matched \emph{Danio Rerio} or \emph{Rattus norvegicus} arrays to the human/mouse brain and liver consensus?
+<<ZfishBrain>>=
+brain.meta<-cbind(tissueDistance$brain,
+              GEO.metadata.matrix[
+                match(rownames(tissueDistance$brain),
+                GEO.metadata.matrix$GSM)
+              ,])
+
+Dr.brain.match<-head(brain.meta[
+                      brain.meta$Species == "Danio rerio",
+                      c(1,2,5,6,8)
+                    ],20)
+@
+<<ZfishLiver>>=
+liver.meta<-cbind(tissueDistance$liver,
+              GEO.metadata.matrix[
+                match(rownames(tissueDistance$liver),
+                GEO.metadata.matrix$GSM)
+              ,])
+
+Dr.liver.match<-head(liver.meta[
+                    liver.meta$Species == "Danio rerio",
+                    c(1,2,5,6,8)
+                  ],20)
+@
+<<RatBrain>>=
+Rn.brain.match<-head(brain.meta[
+                    brain.meta$Species == "Rattus norvegicus",
+                    c(1,2,5,6,8)
+                  ],20)
+@
+<<RatLiver>>=
+Rn.liver.match<-head(liver.meta[
+                    liver.meta$Species == "Rattus norvegicus",
+                    c(1,2,5,6,8)
+                  ],20)
+@
+
+<<label=ZfishBrainTab,echo=FALSE,results=tex>>=
+library(xtable)
+print(xtable(Dr.brain.match, caption = "Human/mouse brain - zebrafish matches", label = "Tab_ZfishBrain",
+digits = 3), table.placement = "tbp", caption.placement = "top", size = 5)
+print(xtable(Rn.brain.match, caption = "Human/mouse brain - rat matches", label = "Tab_RatBrain",
+digits = 3), table.placement = "tbp", caption.placement = "top", size = 5)
+print(xtable(Dr.liver.match, caption = "Human/mouse liver - zebrafish matches", label = "Tab_ZfishLiver",
+digits = 3), table.placement = "tbp", caption.placement = "top", size = 5)
+print(xtable(Rn.liver.match, caption = "Human/mouse liver - rat matches", label = "Tab_RatLiver",
+digits = 3), table.placement = "tbp", caption.placement = "top", size = 5)
+@
+
+
+Next step is to quantify this - or show top arrays matching in each species or platform. For example, how many brain samples are there with p<0.02
+
+<<brainQuantification>>=
+sum(brain.meta$pvalue < 0.02)
+sum(brain.meta$distance < 0.2)
+top.brain<-brain.meta[brain.meta$pvalue < 0.02,]
+brain.terms<-c("brain", "Amygdala", "Cortex","Lobe", "hippocamp",
+               "putamen", "hypothalamus", "Hypothlamus", "cerebellum", "Striatum",
+               "DLPFC", "cerebellum","medulla", "Gyrus",
+               "Glioblastoma", "Accumbens", "astrocytoma", "Medulloblastoma",
+               "oligodendrogliomas","cerebrum", "Ventral tegmental", "cerebrum",
+               "stria terminalis", "periaqueductal gray", "thalamus", "cerebellar",
+               "substantia_nigra", "Caudate", "ventral tegmental area",
+               "vestibular_nuclei_superior", "ventral_tegmental_area",
+               "Gloubus Pallidum", "Globus pallidus", "subthalamic_nucleus", "corpus_callosum",
+               "Substantia Nigra", "spinal", "nodose_nucleus", "corticotectal",
+               "Paraventricular", "cortical neurons", "pons", "callosal", "oculomotor nucleus",
+               "Lateral geniculate nucleus","pituitary_gland", "trigeminal_ganglia",
+               "dorsal_root_ganglia", "pars tuberalis", "neuroblastoma", "dorsal root ganglion",
+               "Supraoptic nucleus", "glioma", "astrocytes", "pineal gland", "3ARS02080774b_globus_pallidus"
+               )
+brain.GSE<-c("GSE9443","GSE11100", "GSE15222", "GSE9566", "GSE13041", "GSE2817",
+             "GSE19402", "GSE4206","GSE17617", "GSE13353", "GSE4623", "GSE2547",
+             "GSE19332", "GSE6614")
+
+
+brain.valid<-(rowSums(
+  sapply(brain.terms, function(x){
+    grepl(x, apply(
+            top.brain[, c("Title", "Source", "Characteristics")], 1, function(x){
+                      paste(x, collapse = " ")
+                      }
+                  ), ignore.case = TRUE)
+      })
+  ) > 0)
+brain.valid[top.brain$GSE %in% brain.GSE]<-1
+non.brain<-top.brain[brain.valid == 0,]
+View(non.brain)
+sum(brain.valid)/length(brain.valid)
+table(top.brain[brain.valid == 1,"Species"])
+table(top.brain[brain.valid == 1,"GPL"])
+gpl.name[match(names(table(top.brain[brain.valid == 1,"GPL"])), gpl.name$gpl),]
+@
+<<liverQuantification>>=
+sum(liver.meta$pvalue < 0.02)
+top.liver<-liver.meta[liver.meta$pvalue < 0.02,]
+liver.terms<-c("liver", "hepatocellular", "hepatocyte", "Hepatic",
+               "s854 2dpf GFP+", "s854 3dpf GFP+", "s854 4dpf GFP+", "s854 6dpf GFP+",
+               "cholangiocarcinoma", "HepaRG")
+liver.GSE<-c("GSE6632", "GSE10493", "GSE6903", "GSE9012", "GSE4285", "GSE4740",
+             "GSE1088", "GSE1089", "GSE14712")
+# N.B. could use GSE12189 as a positive/negative control for liver
+
+liver.valid<-(rowSums(
+  sapply(liver.terms, function(x){
+    grepl(x, apply(
+            top.liver[, c("Title", "Source", "Characteristics")], 1, function(x){
+                      paste(x, collapse = " ")
+                      }
+                  ), ignore.case = TRUE)
+      })
+  ) > 0)
+liver.valid[top.liver$GSE %in% liver.GSE]<-1
+non.liver<-top.liver[liver.valid == 0,]
+View(non.liver)
+sum(liver.valid)/length(liver.valid)
+table(top.liver[liver.valid == 1,"Species"])
+table(top.liver[liver.valid == 1,"GPL"])
+gpl.name[match(names(table(top.liver[liver.valid == 1,"GPL"])), gpl.name$gpl),]
+@
+<<lungQuantification>>=
+lung.meta<-cbind(tissueDistance$lung,
+              GEO.metadata.matrix[
+                match(rownames(tissueDistance$lung),
+                GEO.metadata.matrix$GSM)
+              ,])
+sum(lung.meta$pvalue < 0.02)
+sum(lung.meta$distance < 0.2)
+
+top.lung<-lung.meta[lung.meta$pvalue < 0.02,]
+top.lung<-lung.meta[lung.meta$distance < 0.15,]
+lung.terms<-c("lung")
+lung.GSE<-c("GSE11056", "GSE11809", "GSE18083", "GSE7670", "GSE6135", "GSE4512")
+
+# N.B. could use GSE12189 as a positive/negative control for lung
+lung.valid<-(rowSums(
+  sapply(lung.terms, function(x){
+    grepl(x, apply(
+            top.lung[, c("Title", "Source", "Characteristics")], 1, function(x){
+                      paste(x, collapse = " ")
+                      }
+                  ), ignore.case = TRUE)
+      })
+  ) > 0)
+
+lung.valid[top.lung$GSE %in% lung.GSE]<-1
+non.lung<-top.lung[lung.valid == 0,]
+View(non.lung)
+sum(lung.valid)/length(lung.valid)
+table(top.lung[lung.valid == 1,"Species"])
+table(top.lung[lung.valid == 1,"GPL"])
+gpl.name[match(names(table(top.lung[lung.valid == 1,"GPL"])), gpl.name$gpl),]
+@
+<<spleenQuantification>>=
+spleen.meta<-cbind(tissueDistance$spleen,
+              GEO.metadata.matrix[
+                match(rownames(tissueDistance$spleen),
+                GEO.metadata.matrix$GSM)
+              ,])
+sum(spleen.meta$pvalue < 0.02)
+sum(spleen.meta$distance < 0.2)
+top.spleen<-spleen.meta[spleen.meta$pvalue < 0.02,]
+spleen.terms<-c("spleen", "splen", "lymph")
+spleen.GSE<-c()
+
+# N.B. could use GSE12189 as a positive/negative control for spleen
+spleen.valid<-(rowSums(
+  sapply(spleen.terms, function(x){
+    grepl(x, apply(
+            top.spleen[, c("Title", "Source", "Characteristics")], 1, function(x){
+                      paste(x, collapse = " ")
+                      }
+                  ), ignore.case = TRUE)
+      })
+  ) > 0)
+spleen.valid[top.spleen$GSE %in% spleen.GSE]<-1
+non.spleen<-top.spleen[spleen.valid == 0,]
+View(non.spleen)
+sum(spleen.valid[1:100])/length(spleen.valid[1:100])
+table(top.spleen[spleen.valid == 1,"Species"])
+table(top.spleen[spleen.valid == 1,"GPL"])
+gpl.name[match(names(table(top.spleen[spleen.valid == 1,"GPL"])), gpl.name$gpl),]
+@
+
+Problem here is that we are getting bad spleen/lung mixing - could be due to choice of thresholdorcould be due tochoice of threshold in the original POE matrix. It does seem in part to be due be helped by a lower consensus threshold - this implies that it would also be helped by a less stringent POE threshold. Need to look at the relative number of zeros in the matrix again - perhaps need to reduce to 10^-6... works better if not using consensus
+\end{document}
+

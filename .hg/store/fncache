@@ -1,0 +1,240 @@
+data/.DS_Store.i
+data/Fingerprint processing scripts/.DS_Store.i
+data/Fingerprint processing scripts/Analysis of additional data sets.R.i
+data/Fingerprint processing scripts/Brief communication dataset.R.i
+data/Fingerprint processing scripts/Exporting barcode ECDF and POE matrix.R.i
+data/Fingerprint processing scripts/Fingerprinting additional data sets.R.i
+data/Fingerprint processing scripts/Optimizing threshold.R.i
+data/Fingerprint processing scripts/POE_fingerprint.R.i
+data/Fingerprint processing scripts/POE_fingerprint_part2.R.i
+data/Fingerprint processing scripts/POE_fingerprint_part3.R.i
+data/Fingerprint processing scripts/POE_fingerprint_working version.R.i
+data/Fingerprint processing scripts/analysis of SCG histograms_server.R.i
+data/Fingerprint processing scripts/constructing POE thresholds.R.i
+data/Fingerprint processing scripts/covariance background.R.i
+data/Fingerprint processing scripts/gene_vs_pathway_correlation_server.R.i
+data/Fingerprint running scripts/Fingerprint re-normalization_server_7_10_10.R.i
+data/Fingerprint running scripts/GEO descriptions_server.R.i
+data/Fingerprint running scripts/GEOfilesdownload_server.R.i
+data/Fingerprint running scripts/GEOsurvey_server_update.R.i
+data/Fingerprint running scripts/Reading in samples_server_update.R.i
+data/Fingerprint running scripts/SCE_parallel/SCE_parallel_a.R.i
+data/Fingerprint running scripts/SCE_parallel/SCE_parallel_b.R.i
+data/Fingerprint running scripts/SCE_parallel/SCE_parallel_c.R.i
+data/Fingerprint running scripts/SCE_parallel/SCE_parallel_d.R.i
+data/Fingerprint running scripts/SCE_parallel/SCE_parallel_e.R.i
+data/Fingerprint running scripts/SCE_parallel/SCE_parallel_f.R.i
+data/Fingerprint running scripts/SCE_parallel/SCE_parallel_g.R.i
+data/Fingerprint running scripts/SCE_parallel/SCE_parallel_h.R.i
+data/Fingerprint running scripts/SCE_parallel/SCE_parallel_i.R.i
+data/Fingerprint running scripts/SCE_parallel/SCE_parallel_j.R.i
+data/Fingerprint running scripts/SCE_parallel/SCE_parallel_k.R.i
+data/Fingerprint running scripts/SCE_parallel/SCE_parallel_l.R.i
+data/Fingerprint running scripts/SCE_parallel/SCE_parallel_m.R.i
+data/Fingerprint running scripts/SCE_parallel/SCE_parallel_n.R.i
+data/Fingerprint running scripts/Updating fingerprint.R.i
+data/Fingerprint running scripts/adding additional platforms.R.i
+data/Fingerprint running scripts/constructing chip background_server_update.R.i
+data/Fingerprint testing scripts/testing fingerprinting on server.R.i
+data/Fingerprint running scripts/GEOsurvey_server_experimental.R.i
+data/Fingerprint running scripts/Experimental_parallel/parallel_a_experimental.R.i
+data/Fingerprint running scripts/Experimental_parallel/parallel_b_experimental.R.i
+data/Fingerprint running scripts/Experimental_parallel/parallel_c_experimental.R.i
+data/Fingerprint running scripts/Experimental_parallel/parallel_d_experimental.R.i
+data/Fingerprint running scripts/Experimental_parallel/parallel_e_experimental.R.i
+data/Fingerprint running scripts/Experimental_parallel/parallel_f_experimental.R.i
+data/Fingerprint running scripts/Experimental_parallel/parallel_g_experimental.R.i
+data/Fingerprint running scripts/Experimental_parallel/parallel_h_experimental.R.i
+data/Fingerprint running scripts/Experimental_parallel/parallel_i_experimental.R.i
+data/Fingerprint running scripts/Experimental_parallel/parallel_j_experimental.R.i
+data/Fingerprint running scripts/Experimental_parallel/parallel_k_experimental.R.i
+data/Fingerprint running scripts/Experimental_parallel/parallel_l_experimental.R.i
+data/Fingerprint running scripts/Experimental_parallel/parallel_m_experimental.R.i
+data/Fingerprint running scripts/Experimental_parallel/parallel_n_experimental.R.i
+data/Fingerprint running scripts/Reading in samples_server.R.i
+data/Fingerprint processing scripts/.Rhistory.i
+data/Fingerprint processing scripts/Experimental POE analysis.R.i
+data/Fingerprint processing scripts/Experimental_fingerprint_precessing.R.i
+data/Fingerprint processing scripts/background distribution.R.i
+data/Fingerprint processing scripts/connectivity map.R.i
+data/Fingerprint processing scripts/platform data.R.i
+data/Fingerprint running scripts/.DS_Store.i
+data/Fingerprint running scripts/converting genesets.R.i
+data/.hgignore.i
+data/Fingerprint running scripts/.Rhistory.i
+data/Fingerprint running scripts/testing updated pipeline.R.i
+data/Fingerprint processing scripts/randomly permuted genesets.R.i
+data/Fingerprint running scripts/GEOsurvey_server_random.R.i
+data/Fingerprint running scripts/bug fixing.R.i
+data/Fingerprint running scripts/randomBackground.R.i
+data/Fingerprint running scripts/random_SCE_parallel/random_SCE_parallel_a.R.i
+data/Fingerprint running scripts/random_SCE_parallel/random_SCE_parallel_b.R.i
+data/Fingerprint running scripts/random_SCE_parallel/random_SCE_parallel_c.R.i
+data/Fingerprint running scripts/random_SCE_parallel/random_SCE_parallel_d.R.i
+data/Fingerprint running scripts/random_SCE_parallel/random_SCE_parallel_e.R.i
+data/Fingerprint running scripts/random_SCE_parallel/random_SCE_parallel_f.R.i
+data/Fingerprint running scripts/random_SCE_parallel/random_SCE_parallel_g.R.i
+data/Fingerprint running scripts/random_SCE_parallel/random_SCE_parallel_h.R.i
+data/Fingerprint running scripts/random_SCE_parallel/random_SCE_parallel_i.R.i
+data/Fingerprint running scripts/random_SCE_parallel/random_SCE_parallel_j.R.i
+data/Fingerprint running scripts/random_SCE_parallel/random_SCE_parallel_k.R.i
+data/Fingerprint running scripts/random_SCE_parallel/random_SCE_parallel_l.R.i
+data/Fingerprint running scripts/random_SCE_parallel/random_SCE_parallel_m.R.i
+data/Fingerprint running scripts/random_SCE_parallel/random_SCE_parallel_n.R.i
+data/Fingerprint processing scripts/Fingerprint_post_processing.R.i
+data/Fingerprint processing scripts/Random_Fingerprint_post_processing.R.i
+data/Fingerprint running scripts/randomBackground_v0.3.R.i
+data/Reports/benchmarking.Rnw.i
+data/Reports/Rplots.pdf.i
+data/Reports/Sweave.sty.i
+data/Reports/benchmarking-fig1.eps.i
+data/Reports/benchmarking-fig1.pdf.i
+data/Reports/benchmarking-fig2.eps.i
+data/Reports/benchmarking-fig2.pdf.i
+data/Reports/benchmarking.aux.i
+data/Reports/benchmarking.dvi.i
+data/Reports/benchmarking.pdf.i
+data/Reports/benchmarking.tex.i
+data/Reports/benchmarking.pdf.d
+data/Reports/benchmarking-fig2.eps.d
+data/Reports/benchmarking-fig2.pdf.d
+data/Fingerprint processing scripts/GPL_IDs.R.i
+data/Fingerprint processing scripts/Matrix metadata.R.i
+data/Fingerprint processing scripts/building pathprint package.R.i
+data/Fingerprint processing scripts/cellTypes.R.i
+data/Fingerprint processing scripts/removing_cropped_arrays.R.i
+data/Fingerprint running scripts/GEOsurvey_server_sq.R.i
+data/Fingerprint running scripts/SCE_sq_parallel/SCE_parallel_a.R.i
+data/Fingerprint running scripts/SCE_sq_parallel/SCE_parallel_b.R.i
+data/Fingerprint running scripts/SCE_sq_parallel/SCE_parallel_c.R.i
+data/Fingerprint running scripts/SCE_sq_parallel/SCE_parallel_d.R.i
+data/Fingerprint running scripts/SCE_sq_parallel/SCE_parallel_e.R.i
+data/Fingerprint running scripts/SCE_sq_parallel/SCE_parallel_f.R.i
+data/Fingerprint running scripts/SCE_sq_parallel/SCE_parallel_g.R.i
+data/Fingerprint running scripts/SCE_sq_parallel/SCE_parallel_h.R.i
+data/Fingerprint running scripts/SCE_sq_parallel/SCE_parallel_i.R.i
+data/Fingerprint running scripts/SCE_sq_parallel/SCE_parallel_j.R.i
+data/Fingerprint running scripts/SCE_sq_parallel/SCE_parallel_k.R.i
+data/Fingerprint running scripts/SCE_sq_parallel/SCE_parallel_l.R.i
+data/Fingerprint running scripts/SCE_sq_parallel/SCE_parallel_m.R.i
+data/Fingerprint running scripts/SCE_sq_parallel/SCE_parallel_n.R.i
+data/Fingerprint processing scripts/Fingerprint_post_processing_sq.R.i
+data/Fingerprint processing scripts/removing_B_and_agilient_arrays.R.i
+data/Fingerprint running scripts/GEOsurvey_server_sq_random.R.i
+data/Fingerprint running scripts/random_SCE_sq_parallel/random_SCE_parallel_a.R.i
+data/Fingerprint running scripts/random_SCE_sq_parallel/random_SCE_parallel_b.R.i
+data/Fingerprint running scripts/random_SCE_sq_parallel/random_SCE_parallel_c.R.i
+data/Fingerprint running scripts/random_SCE_sq_parallel/random_SCE_parallel_d.R.i
+data/Fingerprint running scripts/random_SCE_sq_parallel/random_SCE_parallel_e.R.i
+data/Fingerprint running scripts/random_SCE_sq_parallel/random_SCE_parallel_f.R.i
+data/Fingerprint running scripts/random_SCE_sq_parallel/random_SCE_parallel_g.R.i
+data/Fingerprint running scripts/random_SCE_sq_parallel/random_SCE_parallel_h.R.i
+data/Fingerprint running scripts/random_SCE_sq_parallel/random_SCE_parallel_i.R.i
+data/Fingerprint running scripts/random_SCE_sq_parallel/random_SCE_parallel_j.R.i
+data/Fingerprint running scripts/random_SCE_sq_parallel/random_SCE_parallel_k.R.i
+data/Fingerprint running scripts/random_SCE_sq_parallel/random_SCE_parallel_l.R.i
+data/Fingerprint running scripts/random_SCE_sq_parallel/random_SCE_parallel_m.R.i
+data/Fingerprint running scripts/random_SCE_sq_parallel/random_SCE_parallel_n.R.i
+data/Fingerprint processing scripts/Fingerprint_post_processing_sq_random.R.i
+data/Fingerprint processing scripts/Fingerprint_post_processing_step1.R.i
+data/Fingerprint processing scripts/Fingerprint_post_processing_step2.R.i
+data/Fingerprint processing scripts/Fingerprint_post_processing_step3.R.i
+data/Fingerprint running scripts/GEOsurvey_server_mean.R.i
+data/Fingerprint running scripts/Reading in samples_NO_UPDATE.R.i
+data/Fingerprint processing scripts/Fingerprint_post_processing_step1_mean.R.i
+data/Fingerprint running scripts/GEOsurvey_server_TF.R.i
+data/Fingerprint running scripts/TF_sq_parallel/TF_parallel_a.R.i
+data/Fingerprint running scripts/TF_sq_parallel/TF_parallel_b.R.i
+data/Fingerprint running scripts/TF_sq_parallel/TF_parallel_c.R.i
+data/Fingerprint running scripts/TF_sq_parallel/TF_parallel_d.R.i
+data/Fingerprint running scripts/TF_sq_parallel/TF_parallel_e.R.i
+data/Fingerprint running scripts/TF_sq_parallel/TF_parallel_f.R.i
+data/Fingerprint running scripts/TF_sq_parallel/TF_parallel_g.R.i
+data/Fingerprint running scripts/TF_sq_parallel/TF_parallel_h.R.i
+data/Fingerprint running scripts/TF_sq_parallel/TF_parallel_i.R.i
+data/Fingerprint running scripts/TF_sq_parallel/TF_parallel_j.R.i
+data/Fingerprint running scripts/TF_sq_parallel/TF_parallel_k.R.i
+data/Fingerprint running scripts/TF_sq_parallel/TF_parallel_l.R.i
+data/Fingerprint running scripts/TF_sq_parallel/TF_parallel_m.R.i
+data/Fingerprint running scripts/TF_sq_parallel/TF_parallel_n.R.i
+data/TFgenesets/TFmodules.Ce.gs.i
+data/TFgenesets/TFmodules.Dm.gs.i
+data/TFgenesets/TFmodules.Dr.gs.i
+data/TFgenesets/TFmodules.Dr.gs.d
+data/TFgenesets/TFmodules.Hs.gs.i
+data/TFgenesets/TFmodules.Hs.gs.d
+data/TFgenesets/TFmodules.Mm.gs.i
+data/TFgenesets/TFmodules.Mm.gs.d
+data/TFgenesets/TFmodules.Rn.gs.i
+data/TFgenesets/TFmodules.Rn.gs.d
+data/TFgenesets/TFmodules.genesets.RData.i
+data/Fingerprint processing scripts/Fingerprint_post_processing_step1_TF.R.i
+data/Fingerprint processing scripts/Fingerprint_post_processing_step2_TF.R.i
+data/Fingerprint processing scripts/Fingerprint_post_processing_step3_TF.R.i
+data/Fingerprint running scripts/.RData.i
+data/Fingerprint running scripts/.RData.d
+data/DPDgenesets/DPD.Hs.gs.i
+data/DPDgenesets/DPD.Hs.gs.d
+data/DPDgenesets/DPD.genesets.RData.i
+data/Fingerprint processing scripts/Fingerprint_post_processing_step1_DPD.R.i
+data/Fingerprint running scripts/DPD_parallel/DPD_parallel_a.R.i
+data/Fingerprint running scripts/DPD_parallel/DPD_parallel_b.R.i
+data/Fingerprint running scripts/DPD_parallel/DPD_parallel_c.R.i
+data/Fingerprint running scripts/DPD_parallel/DPD_parallel_d.R.i
+data/Fingerprint running scripts/DPD_parallel/DPD_parallel_e.R.i
+data/Fingerprint running scripts/DPD_parallel/DPD_parallel_f.R.i
+data/Fingerprint running scripts/DPD_parallel/DPD_parallel_g.R.i
+data/Fingerprint running scripts/DPD_parallel/DPD_parallel_h.R.i
+data/Fingerprint running scripts/DPD_parallel/DPD_parallel_i.R.i
+data/Fingerprint running scripts/DPD_parallel/DPD_parallel_j.R.i
+data/Fingerprint running scripts/DPD_parallel/DPD_parallel_k.R.i
+data/Fingerprint running scripts/DPD_parallel/DPD_parallel_l.R.i
+data/Fingerprint running scripts/DPD_parallel/DPD_parallel_m.R.i
+data/Fingerprint running scripts/DPD_parallel/DPD_parallel_n.R.i
+data/Fingerprint running scripts/GEOsurvey_server_DPD.R.i
+data/Fingerprint running scripts/Reading in samples_NO_UPDATE_GPL570.R.i
+data/Fingerprint running scripts/GEOsurvey_server_union.R.i
+data/Fingerprint running scripts/Reading in samples_NO_UPDATE_GPL570_GPL1261.R.i
+data/Fingerprint running scripts/parallel/parallel_a.R.i
+data/Fingerprint running scripts/parallel/parallel_b.R.i
+data/Fingerprint running scripts/parallel/parallel_c.R.i
+data/Fingerprint running scripts/parallel/parallel_d.R.i
+data/Fingerprint running scripts/parallel/parallel_e.R.i
+data/Fingerprint running scripts/parallel/parallel_f.R.i
+data/Fingerprint running scripts/parallel/parallel_g.R.i
+data/Fingerprint running scripts/parallel/parallel_h.R.i
+data/Fingerprint running scripts/parallel/parallel_i.R.i
+data/Fingerprint running scripts/parallel/parallel_j.R.i
+data/Fingerprint running scripts/parallel/parallel_k.R.i
+data/Fingerprint running scripts/parallel/parallel_l.R.i
+data/Fingerprint running scripts/parallel/parallel_m.R.i
+data/Fingerprint running scripts/parallel/parallel_n.R.i
+data/unionGenesets/DPD.Union.Hs.gs.i
+data/unionGenesets/DPD.Union.Hs.gs.d
+data/unionGenesets/DPD.Union.Mm.gs.i
+data/unionGenesets/DPD.Union.Mm.gs.d
+data/unionGenesets/DPDUnion.genesets.RData.i
+data/unionGenesets/pathwayUnion.genesets.RData.i
+data/unionGenesets/pathways.Union.Hs.gs.i
+data/unionGenesets/pathways.Union.Mm.gs.i
+data/unionGenesets/chipframeCommon_GPL570_GPL1261.RData.i
+data/unionGenesets/chipframeCommon_GPL570_GPL1261.RData.d
+data/Fingerprint processing scripts/Fingerprint_post_processing_step1_Union.R.i
+data/Fingerprint running scripts/GEOsurvey_server_unionDPD.R.i
+data/Fingerprint processing scripts/Fingerprint_post_processing_step1_UnionDPD.R.i
+data/Fingerprint processing scripts/Fingerprint_post_processing_step1_UnionRank.R.i
+data/Fingerprint running scripts/GEOsurvey_server_unionRank.R.i
+data/Fingerprint running scripts/parallel/rank/parallel_a.R.i
+data/Fingerprint running scripts/parallel/rank/parallel_b.R.i
+data/Fingerprint running scripts/parallel/rank/parallel_c.R.i
+data/Fingerprint running scripts/parallel/rank/parallel_d.R.i
+data/Fingerprint running scripts/parallel/rank/parallel_e.R.i
+data/Fingerprint running scripts/parallel/rank/parallel_f.R.i
+data/Fingerprint running scripts/parallel/rank/parallel_g.R.i
+data/Fingerprint running scripts/parallel/rank/parallel_h.R.i
+data/Fingerprint running scripts/parallel/rank/parallel_i.R.i
+data/Fingerprint running scripts/parallel/rank/parallel_j.R.i
+data/Fingerprint running scripts/parallel/rank/parallel_k.R.i
+data/Fingerprint running scripts/parallel/rank/parallel_l.R.i
+data/Fingerprint running scripts/parallel/rank/parallel_m.R.i
+data/Fingerprint running scripts/parallel/rank/parallel_n.R.i

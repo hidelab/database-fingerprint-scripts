@@ -1,0 +1,162 @@
+\documentclass{article}
+\usepackage{Sweave}
+\usepackage{amsmath}
+\usepackage{amscd}
+\usepackage[tableposition=top]{caption}
+\usepackage{ifthen}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage[usenames]{color}
+\definecolor{midnightblue}{rgb}{0.098,0.098,0.439}
+\definecolor{red}{rgb}{0.999,0.000,0.000}
+\DefineVerbatimEnvironment{Sinput}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{midnightblue}, fontsize=\small}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{red}, fontsize=\small}
+\DefineVerbatimEnvironment{Scode}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{midnightblue}, fontsize=\small}
+\fvset{listparameters={\setlength{\topsep}{0pt}}}
+\renewenvironment{Schunk}{\vspace{\topsep}}{\vspace{\topsep}}
+\SweaveOpts{keep.source=TRUE, pdf.version=1.4, eps = FALSE}
+\setkeys{Gin}{width=1.2\textwidth}
+\begin{document}
+\title{Pathway Fingerprinting - clustering tissue-specific data}
+\author{Gabriel Altschuler}
+\maketitle
+This document constructs consensus fingerprints for each of the tissue types profiled in the fingerprint paper and plots a heatmap clustering the different subtypes, as shown in Altschuler et al manuscript figure 2 and supplementary figure 4. A list of tissue-specific datasets was taken from \emph{McCall et al. The Gene Expression Barcode: leveraging public data repositories to begin cataloging the human and murine transcriptomes. Nucleic Acids Res. (2011) 39(Database issue):D1011-5}. This is composed of arrays from 6 tissues; muscle, lung, spleen, kidney, liver and brain. The metadata is contained in a text file. The corresponding Pathway Fingerprints are obtained from the \verb@pathprint@ package.
+<<echo=false>>=
+options(width=60)
+options(SweaveHooks=list(fig=function()
+      par(mar=c(1.1, 1.1, 1.1, 1.1)))
+        )
+options(continue=" ")
+@
+<<loadData>>=
+library(pathprint)
+# load data
+tissueData<-read.delim("tissueData.txt", stringsAsFactors = FALSE)
+# subset for data present in the fingerprint matrix
+tissueData<-tissueData[tissueData$GSM %in% GEO.metadata.matrix$GSM,]
+@
+Now a consensus pathway fingerprint can be created for each tissue/platform combination. A consensus threhold of 0.9 means that a pathways must have a score of +1 (or -1) in 90\% of arrays within a set to have a score of +1 (or -1) in the consensus fingerprint. Plotting a heatmap shows the pathway fingerprint vectors and organizes the samples by hierachical clustering.
+<<consensusfingerprints>>=
+tissueData$Type<-paste(tissueData$Tissue, tissueData$Platform, sep = "_")
+types<-unique(tissueData$Type)
+typeConsensus<-sapply(types, function(x){
+    consensusFingerprint(GEO.fingerprint.matrix[,
+        tissueData$GSM[tissueData$Type == x]],
+    threshold = 0.9)
+    })
+@
+<<heatmap1>>=
+# plot heatmap that contains only the pathways that vary across the dataset
+typeConsensus.SD<-apply(typeConsensus, 1, sd)
+full<-heatmap(typeConsensus[typeConsensus.SD > 0,], mar = c(10,10), scale = "none",
+              keep.dendro = TRUE, col = c("blue", "white", "red"),
+              cexCol = 0.75, cexRow = 0.5)
+@
+\begin{figure}
+\begin{center}
+<<plotheatmap1, fig = TRUE, echo = FALSE>>=
+<<heatmap1>>
+@
+\end{center}
+\caption{Consensus Pathway Fingerprints for each tissue/platform combination. Red = +1 (significantly high expression), white = 0 (non-significant expression), blue = -1(significantly low expression).}
+\label{fig:heatmap1}
+\end{figure}
+Figure~\ref{fig:heatmap1} shows that the samples group by tissue type, rather than by platform (Altschuler et al figure 2 and supplementary figure 4). The pathways that most characterise each tissue and each tissue/platform combination can be highlighted, as shown in Altschuler et al figure 2.
+<<tissues>>=
+tissues<-unique(tissueData$Tissue)
+tissuesConsensus<-sapply(tissues, function(x){
+    consensusFingerprint(GEO.fingerprint.matrix[,
+        tissueData$GSM[tissueData$Tissue == x]],
+    threshold = 0.99)
+    })
+
+# identify pathways unique to each tissue or tissue/platform combination
+tissuesConsensus.unique<-apply(tissuesConsensus, 1, function(x){min(table(x)) == 1})
+typeConsensus.unique<-apply(typeConsensus, 1, function(x){min(table(x)) %in% c(2,3,4)})
+@
+<<heatmap2>>=
+# plot the heatmap              
+heatmap(typeConsensus[
+  (tissuesConsensus.unique & typeConsensus.unique),]
+        , mar = c(10,20), scale = "none",
+       Colv = full$Colv, col = c("blue", "white", "red"),
+        cexCol = 0.75, cexRow = 0.7)
+@
+\begin{figure}
+\begin{center}
+<<plotheatmap2, fig = TRUE, echo = FALSE>>=
+<<heatmap2>>
+@
+\end{center}
+\caption{Basic heatmap showing pathways that most characterize each tissue type - N.B. the clustering is carried over from the full heatmap}
+\label{fig:heatmap2}
+\end{figure}
+\newpage
+The R package @pheatmap@ was used to create the final figures for the manuscript. For the summary figure the very long pathway names were edited for space constraints and only the Wikipathways and Reactome pathways most significantly contributing to the clustering are displayed.
+<<pheatmap>>=
+library(pheatmap)
+names<-rownames(typeConsensus)
+names[grep("Respiratory electron transport", names)]<-
+                    "Respiratory electron transport (Reactome)"
+matrix<-typeConsensus[
+  (tissuesConsensus.unique & typeConsensus.unique),]
+rownames(matrix)<-names[
+  (tissuesConsensus.unique & typeConsensus.unique)]
+@
+<<pheatmaps, include = FALSE>>=
+pheatmap(matrix, col = c("blue", "white", "red"),
+        cexCol = 0.75, cexRow = 0.7, fontsize = 8,
+         cellwidth = 5, cellheight = 5, legend = FALSE
+         )
+@
+<<pheatmapsSub, include = FALSE>>=
+pheatmap(matrix[c(grep("Wikipathways", rownames(matrix)),
+                  grep("Reactome", rownames(matrix))),
+                ],
+         col = c("blue", "white", "red"),
+         cexCol = 0.75, cexRow = 0.7, fontsize = 8,
+         cellwidth = 10, cellheight = 10, legend = FALSE
+         )
+@
+\begin{figure}
+\begin{center}
+<<plotpheatmaps, fig = TRUE, echo = FALSE>>=
+<<pheatmaps>>
+@
+\end{center}
+\caption{Heatmap formatted for the manuscript supplementary figure 4}
+\label{fig:heatmap3}
+\end{figure}
+\begin{figure}
+\begin{center}
+<<plotpheatmapsSub, fig = TRUE, echo = FALSE>>=
+<<pheatmapsSub>>
+@
+\end{center}
+\caption{Heatmap formatted for the manuscript supplementary figure 4 - reduced pathway set}
+\label{fig:heatmap3sub}
+\end{figure}
+<<pheatmap2, include = FALSE>>=
+pheatmap(typeConsensus,
+        # mar = c(10,20), scale = "none",
+       #Colv = full$Colv,
+         col = c("blue", "white", "red"),
+        fontsize = 10,
+         cellwidth = 10, #cellheight = 10,
+         legend = FALSE, show_rownames = F,
+         border_color = NA
+         )
+@
+\begin{figure}
+\begin{center}
+<<plotpheatmap2, fig = TRUE, echo = FALSE>>=
+<<pheatmap2>>
+@
+\end{center}
+\caption{Heatmap formatted for the manuscript supplementary figure 4 - all pathways}
+\label{fig:heatmap4}
+\end{figure}
+\end{document}
+
+
+

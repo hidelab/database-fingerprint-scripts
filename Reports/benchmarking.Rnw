@@ -1,0 +1,964 @@
+\documentclass{article}
+\usepackage{Sweave}
+\usepackage{amsmath}
+\usepackage{amscd}
+\usepackage[tableposition=top]{caption}
+\usepackage{ifthen}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage[usenames]{color}
+\definecolor{midnightblue}{rgb}{0.098,0.098,0.439}
+\DefineVerbatimEnvironment{Sinput}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{midnightblue}}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{xleftmargin=2em}
+\DefineVerbatimEnvironment{Scode}{Verbatim}{xleftmargin=2em}
+\fvset{listparameters={\setlength{\topsep}{0pt}}}
+\renewenvironment{Schunk}{\vspace{\topsep}}{\vspace{\topsep}}
+\SweaveOpts{keep.source=TRUE, pdf.version=1.4, eps = FALSE}
+\begin{document}
+\title{Benchmarking the pathway fingerprint - mean rank - hpc111 version}
+\author{Gabriel Altschuler}
+\maketitle
+
+In this document the ability of the fingerprint to classify samples across species will be evaluated. Two datasets will be used, tissue samples, and cell types in the hematopoiesis lineage.
+\section{Cross-species tissue identification}
+A list of tissue-specific datasets was taken from \emph{Zilliox and Irizarry. A gene expression bar code for microarray data. Nat Meth (2007) vol. 4 (11) pp. 911-3}. This is composed of arrays from 6 tissues; muscle, lung, spleen, kidney, liver and brain.
+\\ First we need to load the probability of expression (POE) matrix that corresponds to this dataset, referred to as the \emph{barcode dataset}, and the accompanying metadata. N.B. The POE matrix is the pathway data matrix prior to applying a threshold to produce the ternary fingerprint.
+<<loadData>>=
+library(pathprint.v0.3.beta2)
+load(
+ "/data/shared/Fingerprint/v0.3_.POE.matrix.2011-06-23.RData"
+  )
+barcode.meta<-read.delim(
+    "/data/shared/Fingerprint/curatedCellTypes/barcode_figure2_data.txt",
+    stringsAsFactors = FALSE)
+data(GEO.metadata.matrix)
+barcode.meta<-barcode.meta[barcode.meta$DB_ID %in% GEO.metadata.matrix$GSM,]
+@
+We only use the samples that are in the matrix. The full barcode set includes yeast negative controls that are not processed by the fingerprint as they have the incorrect species identifier. In addition, there are arrays that were not completely uploaded to GEO and so were removed from the processing pipeline.
+\\ The next step is to define a function to convert a POE matrix to a ternary matrix, according to a threshold
+<<ternaryThreshold>>=
+ternaryThreshold <- function(matrix, threshold)
+  # function to convert a POE matrix to a thresholded matrix
+  {
+  high<-threshold
+  low<-(-threshold)
+  threshold.matrix<-(matrix>high)-(matrix<low)
+  threshold.matrix[is.na(threshold.matrix)]<-0
+  return(threshold.matrix)
+  }
+@
+
+Now define separate matrices for each platform. There is no need to maintain the full POE matrix in memory after this, espcecially as the way in which the parallel processes are spawned later in the script would replicate this across all forks. N.B even with manual garbage collection this memory is not returned to the system until the \verb@R@ session is closed. This is possibly a function of the operating system.
+<<matrix>>=
+GPL570<-barcode.meta[barcode.meta$Platform == "GPL570",]
+GPL96<-barcode.meta[barcode.meta$Platform == "GPL96",]
+GPL1261<-barcode.meta[barcode.meta$Platform == "GPL1261",]
+
+GPL570.matrix<-POE.matrix[,GPL570$DB_ID]
+GPL96.matrix<-POE.matrix[,GPL96$DB_ID]
+GPL1261.matrix<-POE.matrix[,GPL1261$DB_ID]
+rm(POE.matrix)
+@
+\subsection{Classification by nearest neighbor}
+We will now use a simple nearest-neighbor approach to identify the closest human array to each mouse array. This gives us the predicted tissue. We will cycle through a range of threshold values. For expediency this can be run this in parallel on the server using the package \verb@muilticore@.
+<<prediction>>=
+library(multicore)
+library(doMC)
+# run over 15 cores - i.e. 2 thresholds per core
+registerDoMC(cores = 15)
+human.matrix<-cbind(GPL570.matrix, GPL96.matrix)
+human.data<-rbind(GPL570, GPL96)
+class <- foreach (j = 1:30) %dopar% {
+  GPL1261$predictedTissue<-NA
+  n <- seq(0.25, 0.25*30, 0.25)[j]
+  threshold<-10^(-n)
+  human.threshold<-ternaryThreshold(human.matrix, threshold)
+  GPL1261.threshold<-ternaryThreshold(GPL1261.matrix, threshold)
+  ordered<-vector("list", nrow(GPL1261))
+  for (i in 1:nrow(GPL1261)){
+    mouse.fingerprint<-GPL1261.threshold[,GPL1261$DB_ID[i], drop = FALSE]
+    ordered <- sort(colSums(abs(apply(
+                      human.threshold, 2, function(x){x - mouse.fingerprint}
+                                      ))))
+    GPL1261$predictedTissue[i]<-human.data$Tissue[
+                                  human.data$DB_ID == names(ordered)[1]
+                                    ]
+    }  
+  Actual <- as.factor(GPL1261$Tissue)
+  Predicted<-factor(GPL1261$predictedTissue, levels = levels(Actual))
+  m <- table(Actual = Actual, Predicted = Predicted)
+  err <- c(threshold, 1 - sum(diag(m)) / sum(m))
+  return(list(err = err, m = m))
+}
+m<-lapply(class, function(x){x[["m"]]})
+err<-t(sapply(class, function(x){x[["err"]]}))
+@
+The confusion matrix is used to calculate the error rate, as shown for a threshold of 0.001.
+<<m>>=
+m[[12]]
+@
+This table gives an error rate of 
+<<mErr>>=
+1 - sum(diag(m[[12]])) / sum(m[[12]])
+@
+<<label=fig1plot,include=FALSE>>=
+plot(err, log = "x", xlab = "Ternary threshold", ylab = "Error rate",
+    main = "Nearest neighbor, GPL1261 to GPL96")
+@
+\begin{figure}
+\begin{center}
+<<label=fig1,fig=TRUE,echo=FALSE>>=
+<<fig1plot>>
+@
+\end{center}
+\caption{Error rate vs fingerprint threshold}
+\label{fig:one}
+\end{figure}
+\pagebreak
+\subsubsection{comparison to Barcode}
+How does this compare to the barcode data? The barcode matrix based on common genes has already been compiled
+<<loadBarcodeData>>=
+load("/data/shared/Fingerprint/misc/barcode.matrix.RData")
+GPL570.barcode.matrix<-barcode.matrix[,GPL570$DB_ID]
+GPL96.barcode.matrix<-barcode.matrix[,GPL96$DB_ID]
+GPL1261.barcode.matrix<-barcode.matrix[,GPL1261$DB_ID]
+@
+The confusion matrix can be calculated in the same way
+<<barcodeCM>>=
+human.barcode.matrix<-cbind(GPL570.barcode.matrix, GPL96.barcode.matrix)
+GPL1261$predictedTissueBarcode<-NA
+GPL1261$predictedTissueBarcode<-unlist(
+  foreach (i = 1:nrow(GPL1261)) %dopar% {
+  mouse.barcode<-barcode.matrix[,GPL1261$DB_ID[i], drop = FALSE]
+  ordered <- sort(colSums(abs(apply(human.barcode.matrix,
+                                    2,
+                                    function(x){x - mouse.barcode}
+                                    ))))
+  return(human.data$Tissue[human.data$DB_ID == names(ordered)[1]])
+  })
+table(Actual = GPL1261$Tissue, Predicted = GPL1261$predictedTissueBarcode)
+@
+It seems that barcode produces perfect scores in this dataset.
+\subsection{Intra- vs inter-tissue distance}
+The ratio of the within-class to between-class variance can be used as another means to quantify the extent to which the fingerprints formed discrete tissue groups. Variance was defined as sum of the squared distance (Euclidean or Manhattan) between each sample and the mean pathway fingerprint for each tissue.
+<<varRatio>>=
+varRatio<-function(matrix, colClasses, method = "manhattan"){
+  # check values
+  if (!(all.equal(colnames(matrix), names(colClasses)))
+        ) stop("Matrix colnames and class names should match")
+  class.levels<-levels(as.factor(colClasses))
+  class.means<-sapply(class.levels, function(x){
+    rowMeans(matrix[,names(colClasses)[colClasses == x]])
+    })
+  intra.var<-vector("numeric", length(class.levels))
+  names(intra.var) <- class.levels
+  inter.var.sum<-vector("numeric", length(class.levels))
+  names(inter.var.sum) <- class.levels
+  for (i in class.levels){
+    grp.1 <- names(colClasses)[colClasses == i]
+    
+    intra.var[i] <- sum((dist(t(cbind(class.means[,i], matrix[,grp.1])),
+                       method = "manhattan")[1:ncol(matrix[,grp.1])]
+                  )^2)
+    inter.var <- vector("numeric", length(class.levels[class.levels != i]))
+    names(inter.var) <- class.levels[class.levels != i]
+    for (j in class.levels[class.levels != i]){
+        inter.var[j] <- sum((dist(t(cbind(class.means[,j], matrix[,grp.1])),
+                       method = "manhattan")[1:ncol(matrix[,grp.1])]
+                  )^2)
+    }
+    inter.var.sum[i] <- sum(inter.var)
+    }
+  ratio <- sum(intra.var)/sum(inter.var)
+  return(ratio)
+  }
+@
+
+
+
+
+
+
+
+\subsection{Precision-Recall}
+Alternative means of benchmarking is to define precision-recall curves. We will adopt 4 approaches, 1 and 2 consider mouse to human matching, the first grouping all samples together, while the second considers each tissue class separately. In the third approach we will match across all samples, irrespective of species (i.e. not just mouse to human).
+\subsubsection{Approach 1}
+ For this we will calculate the distance from each mouse array to all of the human arrays (or vice-versa). This can be used to construct a list of all the pairs, ranked by their distance. The precision and recall can be calculated at each step as we descend this ranked list.
+\\ First, let's define a function to output the precision and recall
+<<precisionRecall_function>>=
+precisionRecall<-function(
+  testMatrix, recallMatrix, testClass, recallClass, method = "manhattan")
+  # Calculate precision and recall based on rank of distance pairs
+  {
+    # check values
+    if (!(all.equal(colnames(testMatrix), names(testClass)))
+        ) stop("Check test matrix and class should names match")
+    if (!(all.equal(colnames(recallMatrix), names(recallClass)))
+        ) stop("Recall matrix and class names should match")        
+    # define an object to hold the ranked lists
+    ordered<-vector("list", ncol(testMatrix))
+    for (i in 1:ncol(testMatrix)){
+      # rank by distance or correlation
+      if (method == "manhattan"){
+      ordered[[i]] <- sort(colSums(abs(apply(recallMatrix,
+                          2,
+                          function(x){x - testMatrix[,i, drop = FALSE]}
+                          ))))
+        }
+      else if (method == "euclidean"){
+      ordered[[i]] <- sort(colSums(abs(apply(recallMatrix,
+                          2,
+                          function(x){(x - testMatrix[,i, drop = FALSE])^2}
+                          ))))
+        }
+      else if (method == "spearman"){
+      ordered[[i]] <- sort(cor(testMatrix[,i, drop = FALSE], recallMatrix,
+                                method = "spearman")[1,],
+                      decreasing = TRUE)
+        }
+        
+      # set names as correct or incorrectly matched
+      names(ordered[[i]])<-(recallClass[
+                              names(ordered[[i]])
+                                      ] == testClass[i])
+      }
+  # compile list from all samples 
+  if (method %in% c("manhattan", "euclidean")){
+    ordered.all<-sort(unlist(ordered))
+  }
+  else if (method == "spearman"){
+    ordered.all<-sort(unlist(ordered), decreasing = TRUE)
+  }
+  logical.ordered<-as.logical(names(ordered.all))
+  # define precision and recall
+  recall<-cumsum(logical.ordered)/sum(logical.ordered)
+  precision<-cumsum(logical.ordered)/(1:length(logical.ordered))
+  precision.recall<-data.frame(recall = recall, precision = precision)
+  average.precision<-mean(precision[logical.ordered])
+  attr(precision.recall, "Av.precision") <- average.precision
+  return(precision.recall)
+  }
+
+@
+Now we can use this to calculate the PR across the range of thresholds.
+<<precisionRecall_tissues>>=
+mouse.class<-GPL1261$Tissue
+human.class<-human.data$Tissue
+names(mouse.class)<-GPL1261$DB_ID
+names(human.class)<-human.data$DB_ID
+precision.recall<-invisible(foreach (j = 1:30) %dopar% {
+  n <- seq(0.25, 0.25*30, 0.25)[j]
+  threshold<-10^(-n)
+  human.threshold<-ternaryThreshold(human.matrix, threshold)
+  GPL1261.threshold<-ternaryThreshold(GPL1261.matrix, threshold)
+  precisionRecall(testMatrix = GPL1261.threshold,
+                   recallMatrix = human.threshold,
+                   testClass = mouse.class,
+                   recallClass = human.class
+                   )
+  })
+@
+
+<<label=fig2plot,include=FALSE>>=
+op<-par(mfrow = c(1,1), pty = "s")
+par(mfrow = c(5,6), mar = c(1,1,1,1))
+n <- seq(0.25, 0.25*30, 0.25)
+for (i in 1:30){
+  plot.new()
+  axis(1, seq(0,1,0.5))
+  axis(2, seq(0,1,0.5))
+  title(paste("10^", n[i], sep = ""))
+  lines(precision.recall[[i]])
+  }
+par(op)
+@
+\begin{figure}
+\begin{center}
+<<label=fig2,fig=TRUE,echo=FALSE>>=
+<<fig2plot>>
+@
+\end{center}
+\caption{Precision-recall curves for matching mouse to human tissue data}
+\label{fig:two}
+\end{figure}
+
+A precision-recall curve can also be constructed for the barcode matrix
+<<barcodePrecision_recall>>=
+precision.recall.barcode <- precisionRecall(
+                   testMatrix = GPL1261.barcode.matrix,
+                   recallMatrix = human.barcode.matrix,
+                   testClass = mouse.class,
+                   recallClass = human.class
+                   )
+@
+
+<<label=fig3plot,include=FALSE>>=
+plot.new()
+axis(1, seq(0,1,0.2))
+axis(2, seq(0,1,0.2))
+title(main = "precision-recall for barcode and fingerprint", xlab = "recall", ylab = "precision")
+lines(precision.recall.barcode, col = "blue")
+lines(precision.recall[[12]], col = "purple")
+lines(precision.recall[[16]], col = "red")
+
+legend(0.5,0.25, c("Barcode", "Fingerprint (T = 0.001)", "Fingerprint (T = 0.0001)"),
+        text.col = c("blue", "purple", "red"), bty= "n")
+
+par(op)
+@
+\begin{figure}
+\begin{center}
+<<label=fig3,fig=TRUE,echo=FALSE>>=
+<<fig3plot>>
+@
+\end{center}
+\caption{Precision-recall curves for the barcode and fingerprint}
+\label{fig:three}
+\end{figure}
+
+Ranking all possible distances between the samples may not be the best approach due to different inter vs intra tissue distances. We can plot a PCA of the data from \verb@Figure 3@ to provide a view on this.  
+<<PCA>>=
+GPL570.GPL96.GPL1261.0.001<-cbind(
+                           ternaryThreshold(GPL570.matrix, 0.001),
+                           ternaryThreshold(GPL96.matrix, 0.001),
+                           ternaryThreshold(GPL1261.matrix, 0.001)
+                           )
+GPL570.GPL96.GPL1261.0.0001<-cbind(
+                           ternaryThreshold(GPL570.matrix, 0.0001),
+                           ternaryThreshold(GPL96.matrix, 0.0001),
+                           ternaryThreshold(GPL1261.matrix, 0.0001)
+                           )
+GPL570.GPL96.GPL1261.barcode<-barcode.matrix[,
+                              c(GPL570$DB_ID, GPL96$DB_ID, GPL1261$DB_ID)
+                              ]
+pc.0.001<-prcomp(t(GPL570.GPL96.GPL1261.0.001))
+pc.0.0001<-prcomp(t(GPL570.GPL96.GPL1261.0.0001))
+pc.barcode<-prcomp(t(GPL570.GPL96.GPL1261.barcode))
+@
+<<label=fig4plot,include=FALSE>>=
+pc.colors<-rainbow(6)[as.factor(c(GPL570$Tissue, GPL96$Tissue, GPL1261$Tissue))]
+pc.pch<-c(1,2,3)[as.factor(c(GPL570$Platform, GPL96$Platform, GPL1261$Platform))]
+par(mfcol = c(2,2), cex = 0.5)
+plot(pc.0.001$x, col = pc.colors, pch = pc.pch,
+      main = "Fingerprint T = 0.001")
+plot(pc.0.0001$x, col = pc.colors, pch = pc.pch,
+      main = "Fingerprint T = 0.0001")
+plot(pc.barcode$x, col = pc.colors, pch = pc.pch,
+      main = "Barcode")
+plot.new()
+legend("left", levels(as.factor(c(GPL570$Tissue, GPL96$Tissue, GPL1261$Tissue))),
+      text.col = rainbow(6)[1:6], cex = 2, bty = "n")
+legend("right",legend = levels(as.factor(c(GPL570$Platform, GPL96$Platform, GPL1261$Platform))),
+      pch = c(1,2,3), cex = 2, bty = "n")
+@
+\begin{figure}
+\begin{center}
+<<label=fig4,fig=TRUE,echo=FALSE>>=
+<<fig4plot>>
+@
+\end{center}
+\caption{Plots of the two most significant principal components for tissue gene expression data processed using the barcode and fingerprint. The barcode provides marginally better clustering of samples within a platform while the fingerprint more effectively groups samples across platforms}
+\label{fig:four}
+\end{figure}
+\pagebreak
+
+\subsubsection{Approach 2}
+An alternative approach is to construct PR curves for each tissue individually. This can then be combined (using a weighted mean if necessary) to yield an overall PR curve.
+<<PRtissues>>=
+PR.tissues<-invisible(foreach (j = 1:30) %dopar% {
+  n <- seq(0.25, 0.25*30, 0.25)[j]
+  threshold<-10^(-n)
+  human.threshold<-ternaryThreshold(human.matrix, threshold)
+  GPL1261.threshold<-ternaryThreshold(GPL1261.matrix, threshold)
+  precision.recall.tissue<-vector("list", length(levels(as.factor(GPL1261$Tissue))))
+  names(precision.recall.tissue)<-levels(as.factor(GPL1261$Tissue))
+  for (i in 1:length(levels(as.factor(GPL1261$Tissue)))){
+    tissue<-levels(as.factor(GPL1261$Tissue))[i]
+    precision.recall.tissue[[i]] <- precisionRecall(
+      testMatrix = GPL1261.threshold[,GPL1261$Tissue == tissue],
+      recallMatrix = human.threshold,
+      testClass = mouse.class[GPL1261$Tissue == tissue],
+      recallClass = human.class
+      )
+    }
+  precision.recall.tissue
+  })
+@
+\begin{figure}
+\begin{center}
+<<label=fig5plot,fig=TRUE,echo = FALSE>>=
+op<-par(mfrow = c(1,1), pty = "s")
+par(mfrow = c(5,6), mar = c(1,1,1,1))
+n <- seq(0.25, 0.25*30, 0.25)
+tissue <- levels(as.factor(GPL1261$Tissue))[1]
+  for (i in 1:30){
+    plot.new()
+    axis(1, seq(0,1,0.5))
+    axis(2, seq(0,1,0.5))
+    title(paste("10^", n[i], sep = ""))
+    lines(PR.tissues[[i]][[tissue]])
+    }
+  par(op)
+  mtext(text = tissue, line = 2)
+@
+\end{center}
+\caption{Precision-recall curves for matching mouse to human $\Sexpr{tissue}$ data}
+\label{fig:five}
+\end{figure}
+\begin{figure}
+\begin{center}
+<<label=fig6plot,fig=TRUE,echo = FALSE>>=
+op<-par(mfrow = c(1,1), pty = "s")
+par(mfrow = c(5,6), mar = c(1,1,1,1))
+n <- seq(0.25, 0.25*30, 0.25)
+tissue <- levels(as.factor(GPL1261$Tissue))[2]
+  for (i in 1:30){
+    plot.new()
+    axis(1, seq(0,1,0.5))
+    axis(2, seq(0,1,0.5))
+    title(paste("10^", n[i], sep = ""))
+    lines(PR.tissues[[i]][[tissue]])
+    }
+  par(op)
+  mtext(text = tissue, line = 2)
+@
+\end{center}
+\caption{Precision-recall curves for matching mouse to human $\Sexpr{tissue}$ data}
+\label{fig:six}
+\end{figure}
+\begin{figure}
+\begin{center}
+<<label=fig7plot,fig=TRUE,echo = FALSE>>=
+op<-par(mfrow = c(1,1), pty = "s")
+par(mfrow = c(5,6), mar = c(1,1,1,1))
+n <- seq(0.25, 0.25*30, 0.25)
+tissue <- levels(as.factor(GPL1261$Tissue))[3]
+  for (i in 1:30){
+    plot.new()
+    axis(1, seq(0,1,0.5))
+    axis(2, seq(0,1,0.5))
+    title(paste("10^", n[i], sep = ""))
+    lines(PR.tissues[[i]][[tissue]])
+    }
+  par(op)
+  mtext(text = tissue, line = 2)
+@
+\end{center}
+\caption{Precision-recall curves for matching mouse to human $\Sexpr{tissue}$ data}
+\label{fig:seven}
+\end{figure}
+\begin{figure}
+\begin{center}
+<<label=fig8plot,fig=TRUE,echo = FALSE>>=
+op<-par(mfrow = c(1,1), pty = "s")
+par(mfrow = c(5,6), mar = c(1,1,1,1))
+n <- seq(0.25, 0.25*30, 0.25)
+tissue <- levels(as.factor(GPL1261$Tissue))[4]
+  for (i in 1:30){
+    plot.new()
+    axis(1, seq(0,1,0.5))
+    axis(2, seq(0,1,0.5))
+    title(paste("10^", n[i], sep = ""))
+    lines(PR.tissues[[i]][[tissue]])
+    }
+  par(op)
+  mtext(text = tissue, line = 2)
+@
+\end{center}
+\caption{Precision-recall curves for matching mouse to human $\Sexpr{tissue}$ data}
+\label{fig:eight}
+\end{figure}
+\begin{figure}
+\begin{center}
+<<label=fig9plot,fig=TRUE,echo = FALSE>>=
+op<-par(mfrow = c(1,1), pty = "s")
+par(mfrow = c(5,6), mar = c(1,1,1,1))
+n <- seq(0.25, 0.25*30, 0.25)
+tissue <- levels(as.factor(GPL1261$Tissue))[5]
+  for (i in 1:30){
+    plot.new()
+    axis(1, seq(0,1,0.5))
+    axis(2, seq(0,1,0.5))
+    title(paste("10^", n[i], sep = ""))
+    lines(PR.tissues[[i]][[tissue]])
+    }
+  par(op)
+  mtext(text = tissue, line = 2)
+@
+\end{center}
+\caption{Precision-recall curves for matching mouse to human $\Sexpr{tissue}$ data}
+\label{fig:nine}
+\end{figure}
+\begin{figure}
+\begin{center}
+<<label=fig10plot,fig=TRUE,echo = FALSE>>=
+op<-par(mfrow = c(1,1), pty = "s")
+par(mfrow = c(5,6), mar = c(1,1,1,1))
+n <- seq(0.25, 0.25*30, 0.25)
+tissue <- levels(as.factor(GPL1261$Tissue))[6]
+  for (i in 1:30){
+    plot.new()
+    axis(1, seq(0,1,0.5))
+    axis(2, seq(0,1,0.5))
+    title(paste("10^", n[i], sep = ""))
+    lines(PR.tissues[[i]][[tissue]])
+    }
+  par(op)
+  mtext(text = tissue, line = 2)
+@
+\end{center}
+\caption{Precision-recall curves for matching mouse to human $\Sexpr{tissue}$ data}
+\label{fig:ten}
+\end{figure}
+
+We can attempt to combine the tissues by taking an average of the PR curves. As each tissue has a different number of samples we need to interpollate the precision at a defined set of recall values. This will be considered as a next step.
+\\ Another way to view the problem is to construct a PR curve for each sample individually and then combine these curves. Need to interpollate so that we can aggregate points with the same recall value.
+<<PRsamples>>=
+PR.samples<-invisible(foreach (j = 1:30) %dopar% {
+  n <- seq(0.25, 0.25*30, 0.25)[j]
+  threshold<-10^(-n)
+  human.threshold<-ternaryThreshold(human.matrix, threshold)
+  GPL1261.threshold<-ternaryThreshold(GPL1261.matrix, threshold)
+  precision.recall.sample<-matrix(nrow = 100, ncol = ncol(GPL1261.threshold))
+  colnames(precision.recall.sample)<-colnames(GPL1261.threshold)
+  for (i in 1:ncol(GPL1261.threshold)){
+     PR <- precisionRecall(
+      testMatrix = GPL1261.threshold[,i, drop = FALSE],
+      recallMatrix = human.threshold,
+      testClass = mouse.class[i],
+      recallClass = human.class
+      )
+    precision.recall.sample[,i]<-approx(
+                x = PR$recall,
+                y = PR$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+    }
+  rowMeans(precision.recall.sample)
+  })
+@
+\begin{figure}
+\begin{center}
+<<label=fig11plot,fig=TRUE,echo = TRUE>>=
+op<-par(mfrow = c(1,1), pty = "s")
+par(mfrow = c(5,6), mar = c(1,1,1,1))
+n <- seq(0.25, 0.25*30, 0.25)
+for (i in 1:30){
+  plot.new()
+  axis(1, seq(0,1,0.5))
+  axis(2, seq(0,1,0.5))
+  title(paste("10^", n[i], sep = ""))
+  lines(x = seq(0.01, 1, 0.01), y = PR.samples[[i]])
+  }
+  par(op)
+@
+\end{center}
+\caption{Precision-recall curves for aggregated mouse to human tissues data}
+\label{fig:eleven}
+\end{figure}
+Repeating this analysis for the barcode allows a direct comparison between the methods
+<<PRsamples_barcode>>=
+PR.samples.barcode<-matrix(nrow = 100, ncol = ncol(GPL1261.barcode.matrix))
+colnames(PR.samples.barcode)<-colnames(GPL1261.barcode.matrix)
+for (i in 1:ncol(GPL1261.barcode.matrix)){
+ PR <- precisionRecall(
+  testMatrix = GPL1261.barcode.matrix[,i, drop = FALSE],
+  recallMatrix = human.barcode.matrix,
+  testClass = mouse.class[i],
+  recallClass = human.class
+  )
+  PR.samples.barcode[,i]<-approx(
+                x = PR$recall,
+                y = PR$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+    }
+PR.samples.barcode<-rowMeans(PR.samples.barcode)
+@
+\begin{figure}
+\begin{center}
+<<label=fig12plot,fig=TRUE,echo = TRUE>>=
+plot.new()
+axis(1, seq(0,1,0.2))
+axis(2, seq(0,1,0.2))
+title(xlab = "recall", ylab = "precision")
+lines(x = seq(0.01, 1, 0.01), y = PR.samples.barcode, col = "blue")
+lines(x = seq(0.01, 1, 0.01), y = PR.samples[[12]], col = "purple")
+lines(x = seq(0.01, 1, 0.01), y = PR.samples[[16]], col = "red")
+
+legend(0.5,0.25, c("Barcode", "Fingerprint (T = 0.001)", "Fingerprint (T = 0.0001)"),
+        text.col = c("blue", "purple", "red"), bty= "n")
+
+@
+\end{center}
+\caption{Aggregated sample-based precision-recall curves for mouse to human tissue data}
+\label{fig:twelve}
+\end{figure}
+\subsection{Comparison to randomly constructed genesets}
+The fingerprint was establish based on the hypothesis that aggregating genes based on pathways provides a means to integrate 'expert' prior biological knowledge with gene expression data. To test that this knownledge contributes to the success of the fingerprint we have constructed a 'random' fingerprint based on gene sets produced by randomly sampling the pathway fingeprint gene sets. The size distribution has been retained, as has the overall list and frequency of gene IDs.
+<<loadRandomData>>=
+load("~/Documents/Projects/Fingerprinting/data/random_v0.3_.POE.matrix.2011-06-16.RData")
+GPL570.random.matrix<-POE.matrix[,GPL570$DB_ID]
+GPL96.random.matrix<-POE.matrix[,GPL96$DB_ID]
+GPL1261.random.matrix<-POE.matrix[,GPL1261$DB_ID]
+human.random.matrix<-cbind(GPL570.random.matrix, GPL96.random.matrix)
+rm(POE.matrix)
+@
+
+<<PRsamplesRandom>>=
+PR.samples.random<-invisible(foreach (j = 1:30) %dopar% {
+  n <- seq(0.25, 0.25*30, 0.25)[j]
+  threshold<-10^(-n)
+  human.threshold<-ternaryThreshold(human.random.matrix, threshold)
+  GPL1261.threshold<-ternaryThreshold(GPL1261.random.matrix, threshold)
+  precision.recall.sample<-matrix(nrow = 100, ncol = ncol(GPL1261.threshold))
+  colnames(precision.recall.sample)<-colnames(GPL1261.threshold)
+  for (i in 1:ncol(GPL1261.threshold)){
+     PR <- precisionRecall(
+      testMatrix = GPL1261.threshold[,i, drop = FALSE],
+      recallMatrix = human.threshold,
+      testClass = mouse.class[i],
+      recallClass = human.class
+      )
+    precision.recall.sample[,i]<-approx(
+                x = PR$recall,
+                y = PR$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+    }
+  rowMeans(precision.recall.sample)
+  })
+@
+\begin{figure}
+\begin{center}
+<<label=fig13plot,fig=TRUE,echo = TRUE>>=
+op<-par(mfrow = c(1,1), pty = "s")
+par(mfrow = c(5,6), mar = c(1,1,1,1))
+n <- seq(0.25, 0.25*30, 0.25)
+for (i in 1:30){
+  plot.new()
+  axis(1, seq(0,1,0.5))
+  axis(2, seq(0,1,0.5))
+  title(paste("10^", n[i], sep = ""))
+  lines(x = seq(0.01, 1, 0.01), y = PR.samples.random[[i]], col = "blue")
+  lines(x = seq(0.01, 1, 0.01), y = PR.samples[[i]], col = "red")
+  }
+  par(op)
+@
+\end{center}
+\caption{Precision-recall curves for aggregated mouse to human tissues data based on a fingerprint build using pathways and functional interaction modules (red) or randomly constructed gene sets (blue). N.B. the random data was constructed using mean rank rather than mean-squared rank and so this is not a fair comparison}
+\label{fig:thirteen}
+\end{figure}
+
+\pagebreak
+
+\subsubsection{Approach 3}
+Here we will group all samples and construct PR curves for each one, irrespective of it's source. This will test the ability of the fingerprint to classify samples both within and between platforms
+
+<<PRsamplesAll>>=
+full.matrix<-cbind(human.matrix, GPL1261.matrix)
+full.class<-c(human.class, mouse.class)
+PR.samples.all<-invisible(foreach (j = 1:30) %dopar% {
+  n <- seq(0.25, 0.25*30, 0.25)[j]
+  threshold<-10^(-n)
+  full.threshold<-ternaryThreshold(full.matrix, threshold)
+  pr.sample.all<-matrix(nrow = 100, ncol = ncol(full.threshold))
+  av.precision<-vector("numeric", ncol(full.threshold))
+  colnames(pr.sample.all)<-colnames(full.threshold)
+  for (i in 1:ncol(full.threshold)){
+     PR <- precisionRecall(
+      testMatrix = full.threshold[,i, drop = FALSE],
+      recallMatrix = full.threshold[,-i],
+      testClass = full.class[i],
+      recallClass = full.class[-i]
+      )
+    pr.sample.all[,i]<-approx(
+                x = PR$recall,
+                y = PR$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+    av.precision[i]<-attr(PR, "Av.precision")
+    }
+  interpol <- list(
+    PR = rowMeans(pr.sample.all),
+    MAP = mean(av.precision)
+    )
+  })
+@
+<<PRsamples_barcodeAll>>=
+full.barcode.matrix<-cbind(human.barcode.matrix, GPL1261.barcode.matrix)
+PR.samples.barcode.all<-matrix(nrow = 100, ncol = ncol(full.barcode.matrix))
+colnames(PR.samples.barcode.all)<-colnames(full.barcode.matrix)
+barcode.av.precision<-vector("numeric", ncol(full.barcode.matrix))
+for (i in 1:ncol(full.barcode.matrix)){
+ PR <- precisionRecall(
+  testMatrix = full.barcode.matrix[,i, drop = FALSE],
+  recallMatrix = full.barcode.matrix[,-i],
+  testClass = full.class[i],
+  recallClass = full.class[-i]
+  )
+  PR.samples.barcode.all[,i]<-approx(
+                x = PR$recall,
+                y = PR$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+  barcode.av.precision[i]<-attr(PR, "Av.precision")
+  }
+PR.samples.barcode.all<-rowMeans(PR.samples.barcode.all)
+attr(PR.samples.barcode.all, "mean.av.precision") <- mean(barcode.av.precision)
+@
+<<PRsamples_spearmanAll>>=
+load("/data/shared/Fingerprint/misc/barcode.ranks.RData")
+barcode.ranks<-barcode.ranks[,names(full.class)]
+# remove genes with any NAs
+if (length(which(is.na(barcode.ranks))) > 0){
+  na.row<-which(is.na(barcode.ranks), arr.ind = TRUE)[,1]
+  barcode.ranks<-barcode.ranks[-na.row,]
+  }
+PR.samples.spearman.all<-invisible(foreach (i = 1:ncol(barcode.ranks)) %dopar% {
+ PR <- precisionRecall(
+  testMatrix = barcode.ranks[,i, drop = FALSE],
+  recallMatrix = barcode.ranks[,-i],
+  testClass = full.class[i],
+  recallClass = full.class[-i],
+  method = "spearman"
+  )
+  PR.samples.spearman<-approx(
+                x = PR$recall,
+                y = PR$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+  interpol<-list(
+    PR = PR.samples.spearman,
+    AP = attr(PR, "Av.precision")
+    )
+  })
+spearman.MAP<-mean(unlist(
+  lapply(PR.samples.spearman.all, function(x){x[["AP"]]}))
+                   )
+PR.samples.spearman.all<-rowMeans(as.data.frame(
+  lapply(PR.samples.spearman.all, function(x){x[["PR"]]})
+  ))
+@
+<<PRsamples_unthresholdedAll>>=
+PR.samples.unthresholded.all<-invisible(foreach (i = 1:ncol(full.matrix)) %dopar% {
+ PR <- precisionRecall(
+  testMatrix = full.matrix[,i, drop = FALSE],
+  recallMatrix = full.matrix[,-i],
+  testClass = full.class[i],
+  recallClass = full.class[-i],
+  method = "euclidean"
+  )
+  PR.samples.unthresholded<-approx(
+                x = PR$recall,
+                y = PR$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+  
+    interpol<-list(
+      PR = PR.samples.unthresholded,
+      AP = attr(PR, "Av.precision")
+      )            
+  })
+unthresholded.MAP<-mean(unlist(
+  lapply(PR.samples.unthresholded.all, function(x){x[["AP"]]}))
+                   )
+PR.samples.unthresholded.all<-rowMeans(as.data.frame(
+  lapply(PR.samples.unthresholded.all, function(x){x[["PR"]]})
+  ))
+@
+\begin{figure}
+\begin{center}
+<<label=PRsamples_Allplot,fig=TRUE,echo = TRUE>>=
+op<-par(mfrow = c(1,1), pty = "s")
+par(mfrow = c(5,6), mar = c(1,1,1,1))
+n <- seq(0.25, 0.25*30, 0.25)
+for (i in 1:30){
+  plot.new()
+  axis(1, seq(0,1,0.5))
+  axis(2, seq(0,1,0.5))
+  title(paste("10^", n[i], sep = ""))
+  lines(x = seq(0.01, 1, 0.01), y = PR.samples.all[[i]]$PR)
+  }
+  par(op)
+@
+\end{center}
+\caption{Precision-recall curves for aggregated data - approach 3}
+\label{fig:PRsamples_barcodeAllplot}
+\end{figure}
+
+\begin{figure}
+\begin{center}
+<<label=PRsamples_barcode_Allplot,fig=TRUE,echo = TRUE>>=
+plot.new()
+axis(1, seq(0,1,0.2))
+axis(2, seq(0,1,0.2))
+title(xlab = "recall", ylab = "precision")
+lines(x = seq(0.01, 1, 0.01), y = PR.samples.barcode.all, col = "blue")
+lines(x = seq(0.01, 1, 0.01), y = PR.samples.all[[12]]$PR, col = "purple")
+lines(x = seq(0.01, 1, 0.01), y = PR.samples.all[[16]]$PR, col = "pink")
+lines(x = seq(0.01, 1, 0.01), y = PR.samples.all[[20]]$PR, col = "red")
+lines(x = seq(0.01, 1, 0.01), y = PR.samples.spearman.all, col = "green")
+lines(x = seq(0.01, 1, 0.01), y = PR.samples.unthresholded.all, col = "black")
+                                
+legend(0.5,0.35, c("Barcode", "Fingerprint (T = 0.001)",
+                   "Fingerprint (T = 0.0001)", "Fingerprint (T = 0.00001)",
+                   "Spearman", "Unthresholded"),
+        text.col = c("blue", "purple", "pink", "red", "green", "black"), bty= "n")
+
+@
+\end{center}
+\caption{Precision-recall curves for aggregated data - approach 3}
+\label{fig:PRsamples_barcode_Allplot}
+\end{figure}
+
+\begin{figure}
+\begin{center}
+<<label=MAPplot,fig=TRUE,echo = TRUE>>=
+plot(x = threshold<-10^(-seq(0.25, 0.25*30, 0.25)),
+     y = unlist(lapply(
+       PR.samples.all, function(x){x[["MAP"]]}
+       )),
+     log = "x",
+     xlab = "Ternary threshold",
+     ylab = "Mean average precision",
+     ylim = c(0.7, 0.925)
+     )
+abline(h = attr(PR.samples.barcode.all, "mean.av.precision"), col = "blue")
+abline(h = spearman.MAP, col = "green")
+abline(h = unthresholded.MAP, col = "red")
+                                
+legend(0.5,0.35, c("Barcode", "Fingerprint (T = 0.001)",
+                   "Fingerprint (T = 0.0001)", "Fingerprint (T = 0.00001)",
+                   "Spearman", "Unthresholded"),
+        text.col = c("blue", "purple", "pink", "red", "green", "black"), bty= "n")
+
+@
+\end{center}
+\caption{Plot of the mean average precision over the range of thresholds tested for the aggregated dataset (approach 3). Solid lines indicate the mean average precision for Barcode (blue), Spearman correlation (green) and the unthresholded fingerprint (red)}
+\label{fig:MAPplot}
+\end{figure}
+
+
+\section{Cross-species hematopoesis profiling}
+We are also interested to examine how well the fingerprint can group hematopeoitic samples, cross-species.
+Matched cell-type data has already been collated from  \emph{Novershtern et al. Densely Interconnected Transcriptional Circuits Control Cell States in Human Hematopoiesis. Cell (2011)} and \emph{Chambers et al. Hematopoietic fingerprints: an expression database of stem cells and their progeny. Cell Stem Cell (2007) vol. 1 (5) pp. 578-91}.
+
+<<loadBloodData>>=
+load(
+  "/data/shared/Fingerprint/v0.3_.POE.matrix.2011-06-23.RData"
+  )
+bloodSet<-read.delim("/data/shared/Fingerprint/curatedCellTypes/bloodTypesHumanMouse.txt", stringsAsFactors = FALSE)
+bloodSet.POE<-POE.matrix[,bloodSet$gsm]
+rm(POE.matrix)
+head(bloodSet)
+@
+This data contains human and mouse data
+<<splitData>>=
+blood.human<-bloodSet[bloodSet$species == "human",]
+blood.mouse<-bloodSet[bloodSet$species == "mouse",]
+@
+<<prediction_blood>>=
+err.blood <- matrix(nrow = 30, ncol=2)
+for (j in 1:30){
+  blood.mouse$predictedCellType<-NA
+  n <- seq(0.25, 0.25*30, 0.25)[j]
+  threshold<-10^(-n)
+  blood.mouse.threshold<-ternaryThreshold(bloodSet.POE[,blood.mouse$gsm], threshold)
+  blood.human.threshold<-ternaryThreshold(bloodSet.POE[,blood.human$gsm], threshold)
+  for (i in 1:nrow(blood.mouse)){
+    mouse.fingerprint<-blood.mouse.threshold[,blood.mouse$gsm[i], drop = FALSE]
+    ordered <- sort(colSums(abs(apply(blood.human.threshold, 2, function(x){x - mouse.fingerprint}))))
+    blood.mouse$predictedCellType[i]<-blood.human$type[blood.human$gsm == names(ordered)[1]]
+    }  
+  Actual <- as.factor(blood.mouse$type)
+  Predicted<-factor(blood.mouse$predictedCellType, levels = levels(Actual))
+  m<-table(Actual = Actual, Predicted = Predicted)
+  err.blood[j,] <- c(threshold, 1 - sum(diag(m)) / sum(m))
+}
+@
+Again, the confusion matrix is used to calculate the error rate, for example
+<<m>>=
+m
+@
+gives an error rate of 
+<<mErr>>=
+1 - sum(diag(m)) / sum(m)
+@
+<<label=fig15plot,include=FALSE>>=
+plot(err.blood, log = "x", xlab = "Ternary threshold", ylab = "Error rate",
+    main = "Nearest neighbor, mouse to human")
+@
+\begin{figure}
+\begin{center}
+<<label=fig15,fig=TRUE,echo=FALSE>>=
+<<fig15plot>>
+@
+\end{center}
+\caption{Error rate vs fingerprint threshold}
+\label{fig:fifteen}
+\end{figure}
+An alternative approach is to try to define precision-recall curves. For this we will calculate the distance from each mouse array to all of the human arrays (or vice-versa). This can be used to construct a list of all the pairs, ranked by their distance.
+<<precisionRecall_blood>>=
+precision.recall<-vector("list", 30)
+for (j in 1:30){
+  blood.mouse$predictedCellType<-NA
+  n <- seq(0.25, 0.25*30, 0.25)[j]
+  threshold<-10^(-n)
+  blood.mouse.threshold<-ternaryThreshold(bloodSet.POE[,blood.mouse$gsm], threshold)
+  blood.human.threshold<-ternaryThreshold(bloodSet.POE[,blood.human$gsm], threshold)
+  ordered<-vector("list", nrow(blood.mouse))
+  for (i in 1:nrow(blood.mouse)){
+    # create mouse fingerprint
+    mouse.fingerprint<-blood.mouse.threshold[,blood.mouse$gsm[i], drop = FALSE]
+    # Order matched arrays
+    ordered[[i]] <- sort(colSums(abs(apply(blood.human.threshold, 2, function(x){x - mouse.fingerprint}))))
+    # Define matched arrays as correct or incorrect
+    names(ordered[[i]])<-(blood.human$type[match(names(ordered[[i]]), blood.human$gsm)] == blood.mouse$type[i])
+    }
+  ordered.all<-sort(unlist(ordered))
+  x<-1:length(ordered.all)
+  recall<-sapply(x, function(x){
+                sum(as.logical(names(ordered.all))[1:x])/sum(as.logical(names(ordered.all)))
+                })
+  precision<-sapply(x, function(x){
+                  sum(as.logical(names(ordered.all))[1:x])/x
+                  })
+  precision.recall[[j]]<-data.frame(recall = recall, precision = precision)
+  }
+@
+
+<<label=fig16plot,include=FALSE>>=
+op<-par(mfrow = c(1,1), pty = "s")
+par(mfrow = c(5,6), mar = c(1,1,1,1))
+n <- seq(0.25, 0.25*30, 0.25)
+for (i in 1:30){
+  plot.new()
+  axis(1, seq(0,1,0.5))
+  axis(2, seq(0,1,0.5))
+  title(paste("10^", n[i], sep = ""))
+  lines(precision.recall[[i]])
+  }
+par(op)
+@
+\begin{figure}
+\begin{center}
+<<label=fig16,fig=TRUE,echo=FALSE>>=
+<<fig16plot>>
+@
+\end{center}
+\caption{Precision-recall curves for matching mouse to human blood data}
+\label{fig:sixteen}
+\end{figure}
+
+\end{document}
+
+
+

@@ -1,0 +1,106 @@
+\documentclass{article}
+\usepackage{Sweave}
+\usepackage{amsmath}
+\usepackage{amscd}
+\usepackage[tableposition=top]{caption}
+\usepackage{ifthen}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage[usenames]{color}
+\definecolor{midnightblue}{rgb}{0.098,0.098,0.439}
+\definecolor{red}{rgb}{0.999,0.000,0.000}
+\DefineVerbatimEnvironment{Sinput}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{midnightblue}, fontsize=\small}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{red}, fontsize=\small}
+\DefineVerbatimEnvironment{Scode}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{midnightblue}, fontsize=\small}
+\fvset{listparameters={\setlength{\topsep}{0pt}}}
+\renewenvironment{Schunk}{\vspace{\topsep}}{\vspace{\topsep}}
+\SweaveOpts{keep.source=TRUE, pdf.version=1.4, eps = FALSE}
+\setkeys{Gin}{width=1.2\textwidth}
+\begin{document}
+\title{Pathway Fingerprinting - Altschuler et al manuscript tissue heatmaps}
+\author{Gabriel Altschuler}
+\maketitle
+This document constructs phylogenies for the human, mouse and combined blood lineages using maximum parsimony based on pathway fingerprints, as shown in Altschuler et al manuscript figure 2 and supplementary figure 8. Raw data can be retrived the human hematopoiesis data published in \emph{Novershtern et al. Densely Interconnected Transcriptional Circuits Control Cell States in Human Hematopoiesis. Cell (2011)} and the mouse data from \emph{Chambers et al. Hematopoietic fingerprints: an expression database of stem cells and their progeny. Cell Stem Cell (2007) } from \href{http://www.ncbi.nlm.nih.gov/geo/}{GEO} (records GSE24759 and GSE6506 respectively). The data was MAS5-normalized and processed to Pathway Fingerprints using the function \verb@exprs2fingerprint@ in the R package \verb@pathprint@.
+\section{Data}
+<<data>>=
+GSE6506.fingerprint<-read.delim("GSE6506.fingerprint.txt")
+GSE24759.fingerprint<-read.delim("GSE24759.fingerprint.txt")
+@
+The GEO metadata associated with these records is contained within the GEO metadata matrix
+<<meta>>=
+library(pathprint)
+GSE6506.meta<-GEO.metadata.matrix[
+    GEO.metadata.matrix$GSE %in% "GSE6506",]
+GSE6506.meta$cellType<-sapply(GSE6506.meta$Source,
+            function(x){unlist(strsplit(x, split = " isolated"))[[1]]})
+GSE6506.meta$cellType<-gsub(" activated with an LPS treatment and", "", GSE6506.meta$cellType)
+GSE6506.cellTypes<-levels(as.factor(GSE6506.meta$cellType))
+
+GSE24759.meta<-GEO.metadata.matrix[
+    GEO.metadata.matrix$GSE %in% "GSE24759",]
+GSE24759.meta$cellType<-sapply(GSE24759.meta$Characteristics,
+            function(x){unlist(strsplit(x, split = ";"))[[1]]})
+GSE24759.meta$cellType<-gsub("cell type: ", "", GSE24759.meta$cellType)
+GSE24759.cellTypes<-levels(as.factor(GSE24759.meta$cellType))
+@
+Now a consensus pathway fingerprint can be created for each tissue/platform combination. A consensus threhold of 0.75 means that a pathways must have a score of +1 (or -1) in 75\% of arrays within a set to have a score of +1 (or -1) in the consensus fingerprint.
+<<consensus>>=
+threshold <- 0.75
+
+GSE6506.consensus<-sapply(GSE6506.cellTypes, function(x){
+    consensusFingerprint(GSE6506.fingerprint[,
+        GSE6506.meta$GSM[GSE6506.meta$cellType == x]],
+    threshold = threshold)
+    })
+
+GSE24759.consensus<-sapply(GSE24759.cellTypes, function(x){
+    consensusFingerprint(GSE24759.fingerprint[,
+        GSE24759.meta$GSM[GSE24759.meta$cellType == x]],
+    threshold = threshold)
+    })
+@
+Only a subset of the cell types are shared between the human and mouse datasets
+<<subset>>=
+GSE24759.consensus.subset <- GSE24759.consensus[,c("Hematopoietic stem cell_CD133+ CD34dim",
+                                                     "Erythroid_CD34- CD71- GlyA+",
+                                                     "Granulocyte (Neutrophil)",
+                                                     "Monocyte",
+                                                     "Naive B-cells",
+                                                     "Mature NK cell_CD56+ CD16+ CD3-",
+                                                     "Naive CD8+ T-cell",
+                                                     "Naive CD4+ T-cell"
+                                                     )]
+GSE6506.consensus.subset <- GSE6506.consensus[,c("LT-HSC",
+                                          "Nucleated Erythrocytes",
+                                          "Granulocytes",
+                                          "Monocytes",
+                                          "B-Cells",
+                                          "NK cell",
+                                          "CD8+ T-cell naive",
+                                          "CD4+ T-cell naive"
+                                          )]
+# use common names
+colnames(GSE24759.consensus.subset) <- colnames(GSE6506.consensus.subset)
+common.types<-levels(as.factor(colnames(GSE6506.consensus)))
+@
+A consensus fingerprint for the common cell types can be constructed (using a threshold of 0.99)
+<<common>>=
+common.consensus<-sapply(common.types, function(x){
+    consensusFingerprint(cbind(GSE24759.consensus.subset[,
+                                    grep(x, colnames(GSE24759.consensus.subset), fixed = TRUE)],
+                               GSE6506.consensus.subset[,
+                                    grep(x, colnames(GSE6506.consensus.subset), fixed = TRUE)]),
+    threshold = 0.99)
+    })
+
+colnames(GSE24759.consensus.selected)<-paste(colnames(GSE24759.consensus.selected), "_human", sep = "")
+colnames(GSE6506.consensus)<-paste(colnames(GSE6506.consensus), "_mouse", sep = "")
+@
+\section{Phylogenetic Analysis}
+The R packages \verb@ape@ and \verb@phangorn@ provides functions for reading, manipulation and estimation of phylogenetic trees. Maximum Parsimony can be used to estimate the optimum tree based on the characters provided by the Pathway Fingerprint. If available the \verb@multicore@ package can be used to run bootstrapping across parallel processors.
+<<phylogenetics>>=
+library(ape)
+library(phangorn)
+try(library(multicore))
+@
+

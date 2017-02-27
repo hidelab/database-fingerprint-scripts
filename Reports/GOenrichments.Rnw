@@ -1,0 +1,102 @@
+\documentclass{article}
+\usepackage{Sweave}
+\usepackage{amsmath}
+\usepackage{amscd}
+\usepackage[tableposition=top]{caption}
+\usepackage{ifthen}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage[usenames]{color}
+\definecolor{midnightblue}{rgb}{0.098,0.098,0.439}
+\DefineVerbatimEnvironment{Sinput}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{midnightblue}}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{xleftmargin=2em}
+\DefineVerbatimEnvironment{Scode}{Verbatim}{xleftmargin=2em}
+\fvset{listparameters={\setlength{\topsep}{0pt}}}
+\renewenvironment{Schunk}{\vspace{\topsep}}{\vspace{\topsep}}
+\SweaveOpts{keep.source=TRUE, pdf.version=1.4, prefix.string=bloodTreeComparisonFigs/}
+\setkeys{Gin}{width=\textwidth}
+\begin{document}
+\title{GO enrichments of Pathprint pathways}
+\author{Gabriel Altschuler}
+\maketitle
+<<echo=FALSE>>=
+options(width=60, stringsAsFactors = FALSE)
+options(continue=" ")
+tpbEnv <- new.env()
+assign("cat", function(...) cat(file=stderr(),...), tpbEnv)
+environment(txtProgressBar) <- tpbEnv
+@
+This document builds a table to annotate the pathprint pathways and modules with the GO enrichments. This may be of particular use for the static networks which are labeled only be their central gene. The top GO pathway for each module will be described by the most significant P-value, using the hypergeometric distribution, and the number of intersecting genes. The genesets were downloaded in EntrezID format from the \href{http://www.broadinstitute.org/gsea/msigdb/collections.jsp}{Broad MSigDB collection}. The custom script gmt2gs is used to convert the Broad .gmt format to an R list of genesets.
+<<loadData>>=
+library(pathprint)
+library(GMAfunctions)
+GOall<-gmt2gs("c5.all.v3.0.entrez.gmt.txt",
+              symbol2EntrezConvert=FALSE)
+GOcc<-gmt2gs("c5.cc.v3.0.entrez.gmt.txt",
+              symbol2EntrezConvert=FALSE)
+GOmf<-gmt2gs("c5.mf.v3.0.entrez.gmt.txt",
+              symbol2EntrezConvert=FALSE)
+GObp<-gmt2gs("c5.bp.v3.0.entrez.gmt.txt",
+              symbol2EntrezConvert=FALSE)
+@
+The custom script hyperPathway can now be used to assess each of the pathprint genesets for enrichment in the GO categories. A background number of 20000 genes will be used to calculate the P-values. The tables can then be written to a tab-delimited file.
+<<GOenrichments>>=
+pathprint.GOcc <- lapply(pathprint.Hs.gs,
+                         function(x){
+    hyperPathway(genelist=x,
+                 geneset = GOcc,
+                 Nchip = 20000)})
+pathprint.GOmf <- lapply(pathprint.Hs.gs,
+                         function(x){
+    hyperPathway(genelist=x,
+                 geneset = GOmf,
+                 Nchip = 20000)})
+pathprint.GObp <- lapply(pathprint.Hs.gs,
+                         function(x){
+    hyperPathway(genelist=x,
+                 geneset = GObp,
+                 Nchip = 20000)})
+
+
+# construct a dataframe of the top GO category by p-val
+pathprint.GOcc.table.pval <- t(as.data.frame(sapply(pathprint.GOcc, function(x){
+  x[which.min(x$"P-value"), c("Name", "P-value")]
+  })))
+pathprint.GOmf.table.pval <- t(as.data.frame(sapply(pathprint.GOmf, function(x){
+  x[which.min(x$"P-value"), c("Name", "P-value")]
+  })))
+pathprint.GObp.table.pval <- t(as.data.frame(sapply(pathprint.GObp, function(x){
+  x[which.min(x$"P-value"), c("Name", "P-value")]
+  })))
+# construct a dataframe of the top GO category by gene overlap
+pathprint.GOcc.table.genes <- t(as.data.frame(sapply(pathprint.GOcc, function(x){
+  x[which.max(x$"nGenes"), c("Name", "nGenes")]
+  })))
+pathprint.GOmf.table.genes <- t(as.data.frame(sapply(pathprint.GOmf, function(x){
+  x[which.max(x$"nGenes"), c("Name", "nGenes")]
+  })))
+pathprint.GObp.table.genes <- t(as.data.frame(sapply(pathprint.GObp, function(x){
+  x[which.max(x$"nGenes"), c("Name", "nGenes")]
+  })))
+
+# save tables
+write.table(pathprint.GOcc.table.pval,
+            file="pathprint.GOcc.table.pval.txt",
+            quote=F,sep="\t",row.names=T,col.names=T)
+write.table(pathprint.GOmf.table.pval,
+            file="pathprint.GOmf.table.pval.txt",
+            quote=F,sep="\t",row.names=T,col.names=T)
+write.table(pathprint.GObp.table.pval,
+            file="pathprint.GObp.table.pval.txt",
+            quote=F,sep="\t",row.names=T,col.names=T)
+write.table(pathprint.GOcc.table.genes,
+            file="pathprint.GOcc.table.genes.txt",
+            quote=F,sep="\t",row.names=T,col.names=T)
+write.table(pathprint.GOmf.table.genes,
+            file="pathprint.GOmf.table.genes.txt",
+            quote=F,sep="\t",row.names=T,col.names=T)
+write.table(pathprint.GObp.table.genes,
+            file="pathprint.GObp.table.genes.txt",
+            quote=F,sep="\t",row.names=T,col.names=T)
+@
+\end{document}

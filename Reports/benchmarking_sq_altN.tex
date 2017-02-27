@@ -1,0 +1,31 @@
+\documentclass{article}
+\usepackage{Sweave}
+\usepackage{amsmath}
+\usepackage{amscd}
+\usepackage[tableposition=top]{caption}
+\usepackage{ifthen}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage[usenames]{color}
+\definecolor{midnightblue}{rgb}{0.098,0.098,0.439}
+\DefineVerbatimEnvironment{Sinput}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{midnightblue}}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{xleftmargin=2em}
+\DefineVerbatimEnvironment{Scode}{Verbatim}{xleftmargin=2em}
+\fvset{listparameters={\setlength{\topsep}{0pt}}}
+\renewenvironment{Schunk}{\vspace{\topsep}}{\vspace{\topsep}}
+
+\begin{document}
+\title{Benchmarking the pathway fingerprint - squared mean rank - hpc111 version}
+\author{Gabriel Altschuler}
+\maketitle
+
+In this document the ability of the fingerprint to classify samples across species will be evaluated. Two datasets will be used, tissue samples, and cell types in the hematopoiesis lineage.
+\section{Cross-species tissue identification}
+A list of tissue-specific datasets was taken from \emph{Zilliox and Irizarry. A gene expression bar code for microarray data. Nat Meth (2007) vol. 4 (11) pp. 911-3}. This is composed of arrays from 6 tissues; muscle, lung, spleen, kidney, liver and brain.
+\\ First we need to load the probability of expression (POE) matrix that corresponds to this dataset, referred to as the \emph{barcode dataset}, and the accompanying metadata. N.B. The POE matrix is the pathway data matrix prior to applying a threshold to produce the ternary fingerprint.
+\begin{Schunk}
+\begin{Sinput}
+> library(pathprint)
+> load(
++  "/home/galtschu2/Documents/Projects/Fingerprinting/data/sq_.POE.matrix.2011-07-27.RData"
++   )

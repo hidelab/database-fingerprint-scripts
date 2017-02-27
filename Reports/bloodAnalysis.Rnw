@@ -1,0 +1,156 @@
+\documentclass{article}
+\usepackage{Sweave}
+\usepackage{amsmath}
+\usepackage{amscd}
+\usepackage[tableposition=top]{caption}
+\usepackage{ifthen}
+\usepackage[utf8]{inputenc}
+\DefineVerbatimEnvironment{Sinput}{Verbatim} {xleftmargin=2em}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{xleftmargin=2em}
+\DefineVerbatimEnvironment{Scode}{Verbatim}{xleftmargin=2em}
+\fvset{listparameters={\setlength{\topsep}{0pt}}}
+\renewenvironment{Schunk}{\vspace{\topsep}}{\vspace{\topsep}}
+\SweaveOpts{keep.source=TRUE, pdf.version=1.4, eps = FALSE}
+\begin{document}
+\title{Blood analysis - hpc111 version}
+\author{Gabriel Altschuler}
+\maketitle
+
+In this document we will use the blood normal and leukemic lineages to demonstrate the use of the pathway fingerprint to construct phylogneies.
+\\ The required data and metadata is contained within the R package \verb@pathprint@. We will use the \verb@pathprint.v.0.3.beta3@ build in this session.
+The next step is to replicate the blood analysis for the new pathprint package and integrate the zebrafish data wherever possible. 
+\section{Human blood lineage}
+An initial analysis will be on the human hematopoiesis data published in \emph{Novershtern et al. Densely Interconnected Transcriptional Circuits Control Cell States in Human Hematopoiesis. Cell (2011)}. This is contained within the GEO record GSE24759. First we need to source the pathprint package and load the data libraries.
+\\ The metadata can be extracted from the pathprint metadata matrix
+<<echo=false>>=
+options(width=60)
+options(SweaveHooks=list(fig=function()
+      par(mar=c(1.1, 1.1, 1.1, 1.1)))
+        )
+options(continue=" ")
+@
+<<GSE24759.meta>>=
+library(pathprint.v0.3.beta3)
+data(GEO.metadata.matrix)
+GSE24759.meta<-GEO.metadata.matrix[
+    GEO.metadata.matrix$GSE %in% "GSE24759",]
+GSE24759.meta$cellType<-sapply(GSE24759.meta$Characteristics,
+            function(x){unlist(strsplit(x, split = ";"))[[1]]})
+GSE24759.meta$cellType<-gsub("cell type: ", "", GSE24759.meta$cellType)
+GSE24759.cellTypes<-levels(as.factor(GSE24759.meta$cellType))
+@
+The fingerprints can be extracted from the fingerprint matrix and a consensus fingerprint constructed for each of the cell types.
+<<GSE24759.data>>=
+data(GEO.fingerprint.matrix)
+GSE24759.data<-GEO.fingerprint.matrix[,GSE24759.meta$GSM]
+GSE24759.consensus<-sapply(GSE24759.cellTypes, function(x){
+    consensusFingerprint(GEO.fingerprint.matrix[,
+        GSE24759.meta$GSM[GSE24759.meta$cellType == x]],
+    threshold = 0.95)
+    })
+GSE24759.consensus[1:5, 1:5]
+@
+Next the fingerprint matrix will be used to construct a optimum parsimony phylogentic tree. This requires the packages \verb@ape@ and \verb@phangorn@. One caveat is that the server installed version of \verb@ape@ is not compatible with \verb@phangorn@ so if running on the server a locally installed updated version is required.
+\\ A bootstrapped tree will be constructed. The consensus and the bootstrap values will be plotted
+<<GSE24759.parsimony>>=
+try(library(ape, lib.loc = .libPaths()[3]))
+library(ape)
+library(phangorn)
+try(library(multicore))
+try(library(doMC))
+try(registerDoMC(cores = 10))
+# define cost matrix for transitions between two states
+CM<-matrix(c(0,1,2,1,0,1,2,1,0), ncol = 3)
+dimnames(CM) <- list(c(-1,0,1), c(-1,0,1))
+   
+GSE24759.dat <- phyDat(t(GSE24759.consensus), type = "USER", levels = c(-1,0,1))
+GSE24759.dist <- dist.hamming(GSE24759.dat)
+# construct trees
+GSE24759.NJ.tree <- NJ(GSE24759.dist)
+
+#GSE24759.parsimony <- pratchet(
+#  GSE24759.dat, start = GSE24759.NJ.tree, k = 50,
+#  method = "sankoff", cost = CM, trace = 0, np = 1,all = TRUE)
+
+GSE24759.parsimony.boot <- bootstrap.phyDat(
+  GSE24759.dat, bs = 100, pratchet, start = GSE24759.NJ.tree, k = 50,
+  method = "sankoff", cost = CM, trace = 0, np = 1, all = TRUE)
+
+GSE24759.parsimony.boot<-c(
+  GSE24759.parsimony.boot[
+    lapply(GSE24759.parsimony.boot, class) == "phlyo"
+    ],
+  unlist(GSE24759.parsimony.boot[
+    lapply(GSE24759.parsimony.boot, class) == "multiPhylo"
+    ],
+         recursive = FALSE)
+  )
+
+GSE24759.parsimony.consensus<-consensus(GSE24759.parsimony.boot, p = 0.5)
+
+GSE24759.parsimony.consensus$node.label<-round((100*prop.clades(
+  GSE24759.parsimony.consensus, GSE24759.parsimony.boot)
+                      )/length(GSE24759.parsimony.boot))
+
+
+for (i in 1:length(GSE24759.parsimony.boot)){
+  GSE24759.parsimony.boot[[i]]$node.label<-(100*prop.clades(
+    GSE24759.parsimony.boot[[i]], GSE24759.parsimony.boot)
+                      )/length(GSE24759.parsimony.boot)
+}
+
+# Select tree with highest bootstrap scores
+GSE24759.parsimony.top<-GSE24759.parsimony.boot[[
+  order(sapply(GSE24759.parsimony.boot, function(x){
+    sum(x$node.label)
+    }), decreasing = TRUE)[1]
+  ]]
+  
+GSE24759.parsimony.top$node.label<-round(GSE24759.parsimony.top$node.label)
+
+try(GSE24759.parsimony.top<-root(
+  GSE24759.parsimony.top, 21, resolve.root = TRUE))
+try(GSE24759.parsimony.consensus<-root(
+  GSE24759.parsimony.consensus, 21, resolve.root = TRUE))
+@
+<<plotGSE24759parsimony, include = FALSE>>=
+plot(GSE24759.parsimony.top, show.node.label = FALSE, label.offset = 1)
+nodelabels(GSE24759.parsimony.top$node.label, bg = "white", cex = 0.75)
+@
+<<plotGSE24759parsimonyConsensus, include = FALSE>>=
+plot(GSE24759.parsimony.consensus, show.node.label = FALSE, label.offset = 1)
+nodelabels(GSE24759.parsimony.consensus$node.label, bg = "white", cex = 0.75)
+@
+\newpage
+\begin{figure}
+\begin{center}
+<<label=plotGSE24759parsimonyPlot,fig=TRUE,echo=FALSE>>=
+<<plotGSE24759parsimony>>
+@
+\end{center}
+\caption{Maximum parsimony tree with highest bootstrap values for GSE24759 cell types, numbers indicate bootstrap values}
+\label{fig:GSE24759parsimony}
+\begin{center}
+<<label=plotGSE24759parsimonyConsensusPlot,fig=TRUE,echo=FALSE>>=
+<<plotGSE24759parsimonyConsensus>>
+@
+\end{center}
+\caption{Consensus parsimony tree for GSE24759 cell types from bootstraps, numbers indicate bootstrap values}
+\label{fig:GSE24759consensus}
+\end{figure}
+
+Can these blood types be matched to the GEO corpus? First try with the HSCs.
+<<matchTypes>>=
+invisible(GSE24759.types.distance<-apply(GSE24759.consensus, 2,
+        consensusDistance, GEO.fingerprint.matrix))
+
+GSE24759.types.distance.meta<-lapply(
+  names(GSE24759.types.distance), function(x){
+    cbind(GSE24759.types.distance[[x]],
+            GEO.metadata.matrix[
+              match(rownames(GSE24759.types.distance[[x]]),
+              GEO.metadata.matrix$GSM)
+                ,])})
+names(GSE24759.types.distance.meta)<-names(GSE24759.types.distance)
+@
+\end{document}

@@ -1,0 +1,37 @@
+\documentclass{article}
+\usepackage{Sweave}
+\usepackage{amsmath}
+\usepackage{amscd}
+\usepackage[tableposition=top]{caption}
+\usepackage{ifthen}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage[usenames]{color}
+\definecolor{midnightblue}{rgb}{0.098,0.098,0.439}
+\definecolor{red}{rgb}{0.999,0.000,0.000}
+\DefineVerbatimEnvironment{Sinput}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{midnightblue}, fontsize=\small}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{red}, fontsize=\small}
+\DefineVerbatimEnvironment{Scode}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{midnightblue}, fontsize=\small}
+\fvset{listparameters={\setlength{\topsep}{0pt}}}
+\renewenvironment{Schunk}{\vspace{\topsep}}{\vspace{\topsep}}
+
+\setkeys{Gin}{width=1.2\textwidth}
+\begin{document}
+\input{LeukemiaPathwaysSurvivalAnalysis-concordance}
+\title{Pathway Fingerprinting - Altschuler et al - Leukemia Stem Pathways}
+\author{Gabriel Altschuler}
+\maketitle
+\tableofcontents
+This Sweave document contains the code used to produce the comparison of stem cell pathways in human and mouse leukemia, and the associated survival analysis contained within Altschuler et al.
+\section{Settings and Libraries}
+\begin{Schunk}
+\begin{Sinput}
+> # define environment settings and load packages and scripts
+> options(width=60, stringsAsFactors = FALSE)
+> options(continue=" ")
+> tpbEnv <- new.env()
+> assign("cat", function(...) cat(file=stderr(),...), tpbEnv)
+> environment(txtProgressBar) <- tpbEnv
+> library(pathprint)
+> library(GEOmetadb)
+> source("supplementaryFunctions.R")

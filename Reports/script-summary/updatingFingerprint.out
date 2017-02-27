@@ -1,0 +1,11 @@
+\BOOKMARK [1][-]{section.1}{Running the fingerprint}{}% 1
+\BOOKMARK [2][-]{subsection.1.1}{Initiating the run}{section.1}% 2
+\BOOKMARK [2][-]{subsection.1.2}{Master script}{section.1}% 3
+\BOOKMARK [2][-]{subsection.1.3}{Obtaining a list of arrays}{section.1}% 4
+\BOOKMARK [2][-]{subsection.1.4}{Donwloading array data}{section.1}% 5
+\BOOKMARK [2][-]{subsection.1.5}{Pathway enrichment analysis}{section.1}% 6
+\BOOKMARK [1][-]{section.2}{Post-processing}{}% 7
+\BOOKMARK [2][-]{subsection.2.1}{Phase 1}{section.2}% 8
+\BOOKMARK [2][-]{subsection.2.2}{Phase 2}{section.2}% 9
+\BOOKMARK [2][-]{subsection.2.3}{Phase 3}{section.2}% 10
+\BOOKMARK [1][-]{section.3}{Updating the pathprint R package files}{}% 11

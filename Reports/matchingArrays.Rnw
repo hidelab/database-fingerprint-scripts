@@ -1,0 +1,422 @@
+
+\documentclass{article}
+\usepackage{Sweave}
+\SweaveOpts{keep.source=TRUE}
+\begin{document}
+\title{Matching arrays using the pathway fingerprint - hpc111 version}
+\author{Gabriel Altschuler}
+\maketitle
+
+In this document we will test the ability of the fingerprint to pull out simliar arrays across platforms and species in the GEO corpus.
+\\ The required data and metadata is contained within the R package \verb@pathprint@. We will use the \verb@pathprint.v.0.3.beta@ build in this session. In addition, we will make use of the tissue samples curated in \emph{Zilliox and Irizarry. A gene expression bar code for microarray data. Nat Meth (2007) vol. 4 (11) pp. 911-3}, a set of arrays from 6 tissues; muscle, lung, spleen, kidney, liver and brain.
+\\ First we need to source the pathprint package and load the data libraries containing the fingerprint and the metadata. We will also load the tissue-specific data from a local file from the shared directory on \verb@hpc111@.
+<<data>>=
+library(pathprint.v0.3.beta2)
+data(GEO.metadata.matrix)
+data(GEO.fingerprint.matrix)
+library(GEOmetadb)
+con <- dbConnect(SQLite(),
+  "/home/galtschu2/Documents/Databases/GEOmetadb/GEOmetadb.sqlite"
+    )
+###
+# on local mac
+#con <- dbConnect(SQLite(),
+#  "/Users/GabrielAltschuler/Documents/Databases/GEOmetadb/GEOmetadb.sqlite"
+#    )
+###
+gpl.species<-dbGetQuery(con, "select gpl, organism from gpl")
+gpl.name<-dbGetQuery(con, "select gpl, title from gpl")
+dbDisconnect(con)
+GEO.metadata.matrix$platformSpecies<-gpl.species$organism[
+  match(GEO.metadata.matrix$GPL, gpl.species$gpl)]
+GEO.metadata.matrix<-GEO.metadata.matrix[
+  GEO.metadata.matrix$Species == GEO.metadata.matrix$platformSpecies,]
+# remove "B" arrays
+GEO.metadata.matrix<-GEO.metadata.matrix[
+  !(GEO.metadata.matrix$GPL %in% c("GPL340", "GPL97")),]
+
+GEO.fingerprint.matrix<-GEO.fingerprint.matrix[,
+  colnames(GEO.fingerprint.matrix) %in% GEO.metadata.matrix$GSM]
+tissue.meta<-read.delim(
+  "/data/shared/Fingerprint/curatedCellTypes/barcode_figure2_data.txt",
+  stringsAsFactors = FALSE)
+# if on local
+#tissue.meta<-read.delim(
+#  "/Users/GabrielAltschuler/Documents/Projects/Fingerprinting/barcode/output/barcode_figure2_data.txt",
+#  stringsAsFactors = FALSE)
+colnames(tissue.meta)
+tissue.meta<-tissue.meta[tissue.meta$DB_ID %in% colnames(GEO.fingerprint.matrix),]
+(tissues<-levels(as.factor(tissue.meta$Tissue)))
+@
+\pagebreak
+\section{Tissue consensus fingerprints}
+For each tissue, we will construct a "\emph{consensus fingerprint}", this is a pathway vector that contains \verb@1@ or \verb@-1@ at for pathways that have consistently high or low expression across all of the samples in the set and \verb@0@ otherwise, given a fractional threshold. This uses the pathprint functions \verb@consensusFingerprint@,  We will initailly set the threshold to 0.75.
+
+<<tissueConsensus>>=
+tissueConsensus<-sapply(tissues, function(x){
+    consensusFingerprint(GEO.fingerprint.matrix[,
+        tissue.meta$DB_ID[tissue.meta$Tissue == x]],
+    threshold = 0.75)
+    })
+head(tissueConsensus)
+@
+We can now use the Manhattan distance as a measure of similiarity to each of these vectors for all of the arrays in the fingerprint corpus. The function \verb@consensusDistance@ is used to calculate the distances and approximate p-value.
+<<tissueDistance>>=
+tissueDistance<-apply(tissueConsensus, 2,
+        consensusDistance, GEO.fingerprint.matrix)
+@
+An alternative method is to use the mean fingerprint and calculate the distance from this
+The status outputs indicate the maximum manhattan distance possible based on the number of scored pathways in each consensus.
+<<label=distHist,include=FALSE>>=
+op<-par(mfrow = c(1,1), pty = "s")
+par(mfcol = c(2,3))
+brain.dist.hist<-hist(tissueDistance$brain[,"distance"],
+    nclass = 50, xlim = c(0,1), main = "brain", xlab = "Scaled distance")
+kidney.dist.hist<-hist(tissueDistance$kidney[,"distance"],
+    nclass = 50, xlim = c(0,1), main = "kidney", xlab = "Scaled distance")
+liver.dist.hist<-hist(tissueDistance$liver[,"distance"],
+    nclass = 50, xlim = c(0,1), main = "liver", xlab = "Scaled distance")
+lung.dist.hist<-hist(tissueDistance$lung[,"distance"],
+    nclass = 50, xlim = c(0,1), main = "lung", xlab = "Scaled distance")
+skeletalmuscle.dist.hist<-hist(tissueDistance$"skeletal muscle"[,"distance"],
+    nclass = 50, xlim = c(0,1), main = "skeletal muscle", xlab = "Scaled distance")
+spleen.dist.hist<-hist(tissueDistance$spleen[,"distance"],
+    nclass = 50, xlim = c(0,1), main = "spleen", xlab = "Scaled distance")
+par(op)
+@
+<<label=distHistsub,include=FALSE>>=
+hist(tissueDistance$brain[
+        tissue.meta$DB_ID[tissue.meta$Tissue == "brain"],
+        "distance"],
+    breaks = brain.dist.hist$breaks,
+    xlim = c(0,1), main = "", xlab = "Scaled distance")
+#par(op)
+@
+\newpage
+\begin{figure}
+\begin{center}
+<<label=distHistPlot,fig=TRUE,echo=FALSE>>=
+<<distHist>>
+@
+\end{center}
+\caption{Histograms of the distance from the tissue consensus of all GEO samples}
+\begin{center}
+<<label=distHistsubPlot,fig=TRUE,echo=FALSE>>=
+<<distHistsub>>
+@
+\end{center}
+\caption{Histograms of the distance from the brain consensus of the brain tissues that made up the consensus signature.}
+\label{fig:brainHist}
+\end{figure}
+Figure \ref{fig:brainHist} shows a histogram of the distances from the brain consensus for the full corpus and for the brain tissues that made up the signature. This can also be represented as a table. Or we can extract the top ranking arrays for a particular platform, e.g. what are the closest matched \emph{Danio Rerio} or \emph{Rattus norvegicus} arrays to the human/mouse brain and liver consensus?
+<<ZfishBrain>>=
+brain.meta<-cbind(tissueDistance$brain,
+              GEO.metadata.matrix[
+                match(rownames(tissueDistance$brain),
+                GEO.metadata.matrix$GSM)
+              ,])
+
+Dr.brain.match<-head(brain.meta[
+                      brain.meta$Species == "Danio rerio",
+                      c(1,2,5,6,8)
+                    ],20)
+@
+<<ZfishLiver>>=
+liver.meta<-cbind(tissueDistance$liver,
+              GEO.metadata.matrix[
+                match(rownames(tissueDistance$liver),
+                GEO.metadata.matrix$GSM)
+              ,])
+
+Dr.liver.match<-head(liver.meta[
+                    liver.meta$Species == "Danio rerio",
+                    c(1,2,5,6,8)
+                  ],20)
+@
+<<RatBrain>>=
+Rn.brain.match<-head(brain.meta[
+                    brain.meta$Species == "Rattus norvegicus",
+                    c(1,2,5,6,8)
+                  ],20)
+@
+<<RatLiver>>=
+Rn.liver.match<-head(liver.meta[
+                    liver.meta$Species == "Rattus norvegicus",
+                    c(1,2,5,6,8)
+                  ],20)
+@
+
+<<label=ZfishBrainTab,echo=FALSE,results=tex>>=
+library(xtable)
+print(xtable(Dr.brain.match, caption = "Human/mouse brain - zebrafish matches", label = "Tab_ZfishBrain",
+digits = 3), table.placement = "tbp", caption.placement = "top", size = 5)
+print(xtable(Rn.brain.match, caption = "Human/mouse brain - rat matches", label = "Tab_RatBrain",
+digits = 3), table.placement = "tbp", caption.placement = "top", size = 5)
+print(xtable(Dr.liver.match, caption = "Human/mouse liver - zebrafish matches", label = "Tab_ZfishLiver",
+digits = 3), table.placement = "tbp", caption.placement = "top", size = 5)
+print(xtable(Rn.liver.match, caption = "Human/mouse liver - rat matches", label = "Tab_RatLiver",
+digits = 3), table.placement = "tbp", caption.placement = "top", size = 5)
+@
+\pagebreak
+\section{Precision-recall of matching arrays}
+Next step is to quantify this - or show top arrays matching in each species or platform. For example, how many brain samples are there with p<0.02. To do this we need to collect the metadata across the full corpus. This will be done in a rough way by collecting \emph{terms} or keywords related with specific tissues and seraching the source, chararcteristics and title for any of these \emph{terms}. The top 7500 arrays for each tissue were manually re-curated to ensure that the \emph{terms} set was appropriate. In addition, specific GSEs that had insufficient metadata to identify the source were individually examined. These were assigned on a case by case basis.
+
+<<defineTerms>>=
+brain.terms<-c(
+  "brain", "Amygdala", "Cortex","Lobe", "hippocamp",
+  "putamen", "hypothalamus", "Hypothlamus", "cerebellum", "Striatum",
+  "DLPFC", "cerebellum","medulla", "Gyrus",
+  "Glioblastoma", "Accumbens", "astrocytoma", "Medulloblastoma",
+  "oligodendrogliomas","cerebrum", "Ventral tegmental", "cerebrum",
+  "stria terminalis", "periaqueductal gray", "thalamus", "cerebellar",
+  "substantia_nigra", "Caudate", "ventral tegmental area",
+  "vestibular_nuclei_superior", "ventral_tegmental_area",
+  "Gloubus Pallidum", "Globus pallidus", "subthalamic_nucleus", "corpus_callosum",
+  "Substantia Nigra", "spinal", "nodose_nucleus", "corticotectal",
+  "Paraventricular", "cortical neurons", "pons", "callosal", "oculomotor nucleus",
+  "Lateral geniculate nucleus","pituitary_gland", "trigeminal_ganglia",
+  "dorsal_root_ganglia", "pars tuberalis", "neuroblastoma", "dorsal root ganglion",
+  "Supraoptic nucleus", "glioma", "astrocytes", "pineal gland",
+  "3ARS02080774b_globus_pallidus"
+               )
+brain.GSE<-c("GSE9443","GSE11100", "GSE15222", "GSE9566", "GSE13041", "GSE2817",
+             "GSE19402", "GSE4206","GSE17617", "GSE13353", "GSE4623", "GSE2547",
+             "GSE19332", "GSE6614")
+kidney.terms<-c("kidney", "renal", "glomerulus", "renal", "Papillary", "RCC")
+kidney.GSE<-c("GSE7869", "GSE5243", "GSE13065", "GSE5243", "GSE7869", "GSE1563")
+liver.terms<-c("liver", "hepatocellular", "hepatocyte", "Hepatic", "hepatocytes",
+               "s854 2dpf GFP+", "s854 3dpf GFP+", "s854 4dpf GFP+", "s854 6dpf GFP+",
+               "cholangiocarcinoma", "HepaRG")
+liver.GSE<-c("GSE6632", "GSE10493", "GSE6903", "GSE9012", "GSE4285", "GSE4740",
+             "GSE1088", "GSE1089", "GSE14712")
+lung.terms<-c("lung", "bronchus", "NSCLC", "Bronchial")
+lung.GSE<-c("GSE11056", "GSE11809", "GSE18083", "GSE7670", "GSE6135", "GSE4512",
+            "GSE21581")
+muscle.terms<-c(
+  "skeletal muscle", "Proximal muscle", "vastus lateralis", "Biceps Brachii",
+  "vastus laterlis", "Quadricep", "skeletal_muscle", "Paravertebral",
+  "Deltoid", "Rectus femoris", "triceps", "superior rectus", "Vastus Lateralus",
+  "Gastrocnemius", "Flexor carpi", "tibialis cranialis", "tibialis anterior",
+  "calf muscle", "carpi radialis brevis", "gracillus", "tibialis anterior muscle",
+  "gracilis", "latissimus dorsi", "Soleus muscle", "muscle", "Tongue", "heart",
+  "diaphragm", "Intestine", "atrial", "ventricular",  "Cardiac", "Ventricle",
+  "Cardiomyocytes", "Anterior tibialis")
+muscle.GSE<-c("GSM397580", "GSM397583", "GSE1551", "GSE1764", "GSE80", "GSE12580",
+              "GSE21610", "GSE897", "GSE3307", "GSE6970")
+spleen.terms<-c("spleen", "splen", "lymph")
+spleen.GSE<-c("GSE24350", "GSE6980", "GSE24350", "GSE16059", "GSM541854")
+tissue.terms<-list(
+  brain.terms, kidney.terms, liver.terms, lung.terms, muscle.terms, spleen.terms
+    )
+tissue.GSE<-list(brain.GSE, kidney.GSE, liver.GSE, lung.GSE, muscle.GSE, spleen.GSE)
+names(tissue.terms)<-tissues
+names(tissue.GSE)<-tissues
+@
+<<Quantification>>=
+tissue.distance<-vector("list", length(tissues))
+tissueDistance.meta<-lapply(tissues, function(x){
+  cbind(tissueDistance[[x]],
+          GEO.metadata.matrix[
+            match(rownames(tissueDistance[[x]]),
+            GEO.metadata.matrix$GSM)
+              ,])})
+names(tissueDistance.meta)<-tissues
+
+for (i in 1:length(tissues)){
+  tissue<-tissues[i]
+  print(tissue)
+  tissueDistance.meta[[tissue]]$valid<-(rowSums(
+  sapply(tissue.terms[[tissue]], function(x){
+    grepl(x, apply(
+            tissueDistance.meta[[tissue]][, c("Title", "Source", "Characteristics")],
+            1, function(y){
+                      paste(y, collapse = " ")
+                      }
+                  ), ignore.case = TRUE)
+      })
+  ) > 0)
+  tissueDistance.meta[[tissue]]$valid[
+      tissueDistance.meta[[tissue]]$GSE %in% tissue.GSE[[tissue]]
+      ]<-1
+  }
+@
+We can use this to calculate the mean average precision and plot the data as a histogram of the distance overlayed with precision, or as percision-recall plots
+<<MeanAveragedPrecision>>=
+MAP<-sapply(tissues, function(x){
+mean(
+  (cumsum(tissueDistance.meta[[x]]$valid)/(1:length(tissueDistance.meta[[x]]$valid)))[
+    (tissueDistance.meta[[x]]$valid == 1)
+    ])})
+MAP
+@
+\begin{figure}
+\begin{center}
+<<label=histplots, fig = TRUE, echo = TRUE>>=
+par(mfcol = c(2,3))
+for (i in 1:length(tissues)){
+hist(tissueDistance[[i]][,"distance"],
+    breaks = seq(0,1,(sum(abs(2*tissueConsensus[,i])))^(-1)),
+    xlim = c(0,1), main = tissues[[i]], xlab = "Scaled distance", ylab = "")
+par(new = TRUE)
+plot(tissueDistance.meta[[i]]$distance,
+     (cumsum(tissueDistance.meta[[i]]$valid)/(1:length(tissueDistance.meta[[i]]$valid))),
+     ylim = c(0,1), xlim = c(0,1),
+     xaxt = "n", yaxt = "n", xlab = "",
+     ylab = "", type = "l", col = "red")
+axis(4)
+}
+@
+\end{center}
+\caption{Frequency histograms of this distribution of the distance of the GEO corpus from each tissue consensus fingerprint (black, left axis), and the associtated retrieval precision (red, right axis)}
+\label{fig:hist}
+\end{figure}
+
+<<precision.recall.GEO>>=
+precision.recall.tissues<-lapply(tissues, function(x){
+  data.frame(
+    recall = (
+      cumsum(tissueDistance.meta[[x]]$valid)/sum(tissueDistance.meta[[x]]$valid)
+        ),
+    precision = (
+      cumsum(tissueDistance.meta[[x]]$valid)/(1:length(tissueDistance.meta[[x]]$valid))
+        )
+            )
+  })
+names(precision.recall.tissues)<-tissues
+precision.recall.tissues.std<-lapply(precision.recall.tissues, function(z){
+  approx(
+                x = z$recall,
+                y = z$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+  })
+@
+
+\begin{figure}
+\begin{center}
+<<label=PRplot, fig = TRUE, echo = TRUE>>=
+plot.new()
+axis(1, seq(0,1,0.2))
+axis(2, seq(0,1,0.2))
+title(xlab = "recall", ylab = "precision")
+for (i in 1:length(tissues)){
+tissue<-tissues[i]
+lines(x = seq(0.01, 1, 0.01), y = precision.recall.tissues.std[[tissue]],
+      col = rainbow(6)[i])
+}
+legend(x = "topright", tissues,
+        text.col = rainbow(6)[1:6], bty= "n", cex = 0.75)
+@
+\end{center}
+\caption{Precision-recall curves for matched tissue retrieval from the GEO database}
+\label{fig:PRtissues}
+\end{figure}
+
+Finally the results can be summarized as a table
+
+<<precisionTables>>=
+# create table at 95% and 90% precision
+top95.table<-as.data.frame(matrix(nrow = length(tissues), ncol = 4))
+rownames(top95.table)<-tissues
+colnames(top95.table)<-c("Seed arrays", "Correct retrievals", "Platforms", "Species")
+top95.table$"Seed arrays"<-table(tissue.meta$Tissue)[tissues]
+for (i in tissues){
+  top95<-precision.recall.tissues[[i]]$precision > 0.95
+  top95.correct<-(top95 & (tissueDistance.meta[[i]]$valid ==1))
+  top95.table[i,"Correct retrievals"]<-sum(top95.correct)
+  top95.table[i,"Platforms"]<-length(
+    table(tissueDistance.meta[[i]]$GPL[top95.correct])
+    )
+  top95.table[i,"Species"]<-length(
+    table(tissueDistance.meta[[i]]$Species[top95.correct])
+    )
+}
+
+top90.table<-as.data.frame(matrix(nrow = length(tissues), ncol = 4))
+rownames(top90.table)<-tissues
+colnames(top90.table)<-c("Seed arrays", "Correct retrievals", "Platforms", "Species")
+top90.table$"Seed arrays"<-table(tissue.meta$Tissue)[tissues]
+for (i in tissues){
+  top90<-precision.recall.tissues[[i]]$precision > 0.9
+  top90.correct<-(top90 & (tissueDistance.meta[[i]]$valid ==1))
+  top90.table[i,"Correct retrievals"]<-sum(top90.correct)
+  top90.table[i,"Platforms"]<-length(
+    table(tissueDistance.meta[[i]]$GPL[top90.correct])
+    )
+  top90.table[i,"Species"]<-length(
+    table(tissueDistance.meta[[i]]$Species[top90.correct])
+    )
+}
+@
+\pagebreak
+<<label=tissueTab,echo=FALSE,results=tex>>=
+library(xtable)
+print(xtable(top95.table, caption = "Tissue retrieval 95pct precision", label = "Tab_top95",
+digits = 3), table.placement = "tbp", caption.placement = "bottom", size = 5)
+print(xtable(top90.table, caption = "Tissue retrieval 90pct precision", label = "Tab_top90",
+digits = 3), table.placement = "tbp", caption.placement = "bottom", size = 5)
+@
+\pagebreak
+\section{Comparing p-value estimations}
+A major problem is how to assign a measure of significance to a distance from a consensus fingerprint. Without this is it difficult to assign a cutoff at which to evaluate the results. One strategy would be to calculate the probability based on the distribution of fingerprint scores across the full corpus. However, this is compilicated as a) each pathawy has a different distribution of ternary scores and b) the pathways scores are known to be correlated. An alternative strategy is to use the distribution of the corpus to define a background distribution, based on the following (rather gross) assumptions.
+\\ 1) The scores are roughly bi-modal, composed of the distribution of phenotypically similar results (signal) and the distribution of phenotypically distinct results (noise).
+\\ 2) the signal population is negligible compared to the noise.
+\\ 3) The noise samples distances are normally distributed.
+\\ Consequently, we can simply use a normal distribution with mean = \verb@mean(distance)@ and sd = \verb@sd(distance)@ to estimate the p-values. Adding an additional level of complexity, the POE can be used, which is based on a normal-uniform mixture model rather than a simple normal ditribution.
+\\ We can benchmark these measures using the precision. N.B. p-values are calculated within the \verb@pathprint@ package function \verb@consensusDistance@. The POE has been pre-calculated as the run-time is long (a few hours).
+<<POE>>=
+# library(metaArray)
+# for (i in tissues){
+#   fit<-fit.em(tissueDistance[[i]][,"distance"],
+#             cl = rep(0,length(tissueDistance[[i]][,"distance"]))
+#             )
+#   tissueDistance[[i]]$POE<-fit$expr
+# }
+# save(tissueDistance, file = "/data/shared/Fingerprint/tissueDistanceExample.RData")
+load("/data/shared/Fingerprint/tissueDistanceExample.RData")
+@
+\begin{figure}
+\begin{center}
+<<label=POEplot, fig = TRUE, echo = TRUE>>=
+par(mfcol = c(3,2))
+for (i in tissues){
+plot(tissueDistance[[i]]$POE,
+    (cumsum(tissueDistance.meta[[i]]$valid)/(1:length(tissueDistance.meta[[i]]$valid))),
+    type = "l", main = i, xlab = "POE", ylab = "Precision", xlim = c(-1,1))
+}
+@
+\end{center}
+\caption{Plot of precision against POE for tissue retrieval from the GEO corpus}
+\label{fig:POE}
+\end{figure}
+
+\begin{figure}
+\begin{center}
+<<label=Pvalueplot, fig = TRUE, echo = TRUE>>=
+par(mfcol = c(3,2))
+for (i in tissues){
+plot(-log(tissueDistance[[i]]$pvalue,10),
+    (cumsum(tissueDistance.meta[[i]]$valid)/(1:length(tissueDistance.meta[[i]]$valid))),
+    type = "l", main = i, xlab = "-log P-value", ylab = "Precision", xlim = c(0,4))
+}
+@
+\end{center}
+\caption{Plot of precision against POE for tissue retrieval from the GEO corpus}
+\label{fig:Pvalue}
+\end{figure}
+<<precision_pval>>=
+It is instructive to compare the precision levels at a P-value of 0.01
+precision.pval.0.01<-sapply(tissues, function(x){
+  (cumsum(tissueDistance.meta[[x]]$valid)/(1:length(tissueDistance.meta[[x]]$valid)))[
+    which.min(abs(tissueDistance[[x]]$pvalue - 0.01))
+    ]})
+precision.pval.0.05<-sapply(tissues, function(x){
+  (cumsum(tissueDistance.meta[[x]]$valid)/(1:length(tissueDistance.meta[[x]]$valid)))[
+    which.min(abs(tissueDistance[[x]]$pvalue - 0.05))
+    ]})
+precision.pval.0.01
+precision.pval.0.05
+@
+Clearly the estimation is not quite right at this stage
+\end{document}

@@ -1,0 +1,131 @@
+\documentclass{article}
+\usepackage{Sweave}
+\usepackage{amsmath}
+\usepackage{amscd}
+\usepackage[tableposition=top]{caption}
+\usepackage{ifthen}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage[usenames]{color}
+\definecolor{midnightblue}{rgb}{0.098,0.098,0.439}
+\definecolor{red}{rgb}{0.999,0.000,0.000}
+\DefineVerbatimEnvironment{Sinput}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{midnightblue}, fontsize=\small}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{red}, fontsize=\small}
+\DefineVerbatimEnvironment{Scode}{Verbatim}{xleftmargin=2em, fontshape=sl,formatcom=\color{midnightblue}, fontsize=\small}
+\fvset{listparameters={\setlength{\topsep}{0pt}}}
+\renewenvironment{Schunk}{\vspace{\topsep}}{\vspace{\topsep}}
+\SweaveOpts{keep.source=TRUE, pdf.version=1.4, eps = FALSE}
+\setkeys{Gin}{width=1.2\textwidth}
+\begin{document}
+\title{Pathway Fingerprinting - example script}
+\author{Gabriel Altschuler}
+\maketitle
+<<echo=FALSE>>=
+options(width=60, stringsAsFactors = FALSE)
+options(continue=" ")
+tpbEnv <- new.env()
+assign("cat", function(...) cat(file=stderr(),...), tpbEnv)
+environment(txtProgressBar) <- tpbEnv
+@
+This document demonstrates how to use the \verb@pathprint@ package to analyze a dataset using Pathway Fingerprints. The pathprint package takes gene expression data and processes this into discrete expression scores (+1,0,-1) for a set of 633 pathways. For more information, see the \href{http://compbio.sph.harvard.edu/hidelab/pathprint/Pathprint/Pathway_Fingerprint.html}{pathprint website}.
+\tableofcontents
+\section{Initial data processing}
+An existing GEO sample on the Human Affy ST 1.0 chip will be used as en example. The dataset \href{http://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE26946}{GSE26946} profiles expression data from iPS and human ES cells. The R package \verb@GEOquery@ can be used to retrieve the data. An 'exprs' object, i.e. a dataframe with row names corresponding to probe or feature IDs and column names corresponding to sample IDs is required by \verb@pathprint@. In addition, we need to know the GEO reference for the platform, in this case GPL6244, and the species, which is 'human' or "Homo sapiens' (both styles of name work).
+<<data>>=
+library(GEOquery)
+GSE26946 <- getGEO("GSE26946")
+GSE26946.exprs <- exprs(GSE26946[[1]])
+GSE26946.exprs[1:5, 1:3]
+GSE26946.platform <- annotation(GSE26946[[1]])
+GSE26946.species <- as.character(unique(phenoData(GSE26946[[1]])$organism_ch1))
+GSE26946.names <- as.character(phenoData(GSE26946[[1]])$title)
+@
+\section{Pathway fingerprinting}
+\subsection{Fingerprinting from new expression data}
+Now the data has been prepared, the \verb@pathprint@ function \verb@exprs2fingerprint@ can be used to produce a pathway fingerprint from this expression table.
+<<fingerprint>>=
+library(pathprint)
+GSE26946.fingerprint <- exprs2fingerprint(exprs = GSE26946.exprs,
+                                          platform = GSE26946.platform,
+                                          species = GSE26946.species,
+                                          progressBar = TRUE
+                                          )
+
+GSE26946.fingerprint[1:5, 1:3]
+@
+\subsection{Using existing data}
+The pathprint package contains the object \verb@GEO.fingerprint.matrix@ which contains \Sexpr{ncol(GEO.fingerprint.matrix)} samples that have already been fingerprinted, along with their associated metadata, in the object \verb@GEO.metadata.matrix@. As the above data record is publically available from GEO it is actually already in the matrix and we can compare this to the fingerprint processed above. It should be noted that occasionally there may be discrepancies in one or two pathways due to the way in which the threshold is applied. Any existing GEO record not contained within the fingerprint matrix must either a) be on a chip that is not covered or b) have been uploaded to GEO in a not standard manner, normally with an incorrectly matched species name or an unusually small number or probes or feature IDs.
+<<existingFingerprint>>=
+colnames(GSE26946.exprs) %in% colnames(GEO.fingerprint.matrix)
+GSE26946.existing <- GEO.fingerprint.matrix[,colnames(GSE26946.exprs)]
+all.equal(GSE26946.existing, GSE26946.fingerprint)
+@
+\section{Fingerprint Analysis}
+\subsection{Intra-sample comparisons}
+The fingerprint vectors can be used to compare the differntially expressed functions within the sample set. The most straight forward method to represent this is using a heatmap, removing rows for which there is no change in functional expression.
+<<heatmap, include = FALSE>>=
+heatmap(GSE26946.fingerprint[apply(GSE26946.fingerprint, 1, sd) > 0, ],
+        labCol = GSE26946.names,
+        mar = c(10,10),
+        col = c("blue", "white", "red"))
+@
+\begin{figure}
+\begin{center}
+<<plotheatmap, fig = TRUE, echo = FALSE>>=
+<<heatmap>>
+@
+\end{center}
+\caption{Heatmap of GSE26946 pathway fingerprints, blue = -1, white = 0, red = +1}
+\label{fig:heatmap}
+\end{figure}
+\subsection{Using consensusFingerprint and fingerprinDistance, comparison to pluripotent arrays}
+We can also investigate how far in functional distance, these arrays are from other pluripotent fingerprints. This can be achieved using the set of pluripotent arrays included in the package, from which a consensus fingerprint can be created.
+<<pluripotent>>=
+# construct pluripotent consensus
+pluripotent.consensus<-consensusFingerprint(
+  GEO.fingerprint.matrix[,pluripotents.frame$GSM], threshold=0.9)
+
+# calculate distance from the pluripotent consensus for all arrays
+geo.pluripotentDistance<-consensusDistance(
+	pluripotent.consensus, GEO.fingerprint.matrix)
+
+# calculate distance from pluripotent consensus for GSE26946 arrays
+GSE26946.pluripotentDistance<-consensusDistance(
+  pluripotent.consensus, GSE26946.fingerprint)
+
+@
+<<histogram, include = FALSE>>=
+par(mfcol = c(2,1), mar = c(0, 4, 4, 2))
+geo.pluripotentDistance.hist<-hist(geo.pluripotentDistance[,"distance"],
+	nclass = 50, xlim = c(0,1), main = "Distance from pluripotent consensus")
+par(mar = c(7, 4, 4, 2))
+hist(geo.pluripotentDistance[pluripotents.frame$GSM, "distance"],
+	breaks = geo.pluripotentDistance.hist$breaks, xlim = c(0,1), 
+	main = "", xlab = "")
+hist(GSE26946.pluripotentDistance[, "distance"],
+  breaks = geo.pluripotentDistance.hist$breaks, xlim = c(0,1), 
+	main = "", col = "red", add = TRUE)
+@
+\begin{figure}
+\begin{center}
+<<plothistogram, fig = TRUE, echo = FALSE>>=
+<<histogram>>
+@
+\end{center}
+\caption{Histogram representing the distance from the pluripotent consensus fingerprint for all GEO (above), curated pluripotent samples (below), and GSE26946 samples (below, red)}
+\label{fig:histogram}
+\end{figure}
+\subsection{Identifying similar arrays}
+We can use the data contained within the GEO fingerprint matrix to order all of the GEO records according to distance from an experiment (or set of experiments, see below). This can be used, in conjunction with the metadata, to annotate a fingerprint with data from the GEO corpus. Here, we will identify experiments closely matched to the H1, embyonic stem cells within GSE26946
+<<distance>>=
+GSE26946.H1<-consensusFingerprint(
+  GSE26946.fingerprint[,grep("H1", GSE26946.names)], threshold=0.9)
+geo.H1Distance<-consensusDistance(
+  GSE26946.H1, GEO.fingerprint.matrix)
+# look at top 20
+GEO.metadata.matrix[
+  match(head(rownames(geo.H1Distance),20), GEO.metadata.matrix$GSM),
+  c("GSM", "GSE", "GPL", "Source")]
+@
+
+\end{document}

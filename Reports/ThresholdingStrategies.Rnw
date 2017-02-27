@@ -1,0 +1,281 @@
+\documentclass{article}
+\usepackage{Sweave}
+\SweaveOpts{keep.source=TRUE}
+\begin{document}
+\title{Pathway fingerprinting threshold evalutation - hpc111 version}
+\author{Gabriel Altschuler}
+\maketitle
+This document attempts to address the question of the most appripriate threshold to use with the fingerprint. This is also dealt with to a large extent in the document \emph{Benchmarking the pathway fingerprint - hpc111 version}, although here we focus more on the comparison between different thresholding approaches.
+\section{Comparison of thresholds}
+Much of the required data and metadata is contained within the R package \verb@pathprint@. We will use the \verb@pathprint.v.0.3.beta@ build in this session. In addition, we will make use of the tissue samples curated in \emph{Zilliox and Irizarry. A gene expression bar code for microarray data. Nat Meth (2007) vol. 4 (11) pp. 911-3}, a set of arrays from 6 tissues; muscle, lung, spleen, kidney, liver and brain. We also use the raw Probability of Expression (POE) matrix produced in the construction of the fingerprint. This is held on the shared drive of \verb@hpc111@, as well as a POE matrix build using an quivalent collection of random gene sets. This last dataset is not on the shared drive but can be requested from the author.
+\\ First we need to source the pathprint package and load the data libraries containing the fingerprint and the metadata. We will also load the tissue-specific data from a local file from the shared directory on \verb@hpc111@. A simple nearest-neighbor approach is used to identify the closest human array to each mouse array.
+<<data>>=
+library(pathprint.v0.3.beta2)
+load("/data/shared/Fingerprint/v0.3_.POE.matrix.2011-06-23.RData")
+barcode.meta<-read.delim(
+    "/data/shared/Fingerprint/curatedCellTypes/barcode_figure2_data.txt",
+    stringsAsFactors = FALSE)
+data(GEO.metadata.matrix)
+barcode.meta<-barcode.meta[barcode.meta$DB_ID %in% GEO.metadata.matrix$GSM,]
+
+GPL570<-barcode.meta[barcode.meta$Platform == "GPL570",]
+GPL96<-barcode.meta[barcode.meta$Platform == "GPL96",]
+GPL1261<-barcode.meta[barcode.meta$Platform == "GPL1261",]
+GPL570.matrix<-POE.matrix[,GPL570$DB_ID]
+GPL96.matrix<-POE.matrix[,GPL96$DB_ID]
+GPL1261.matrix<-POE.matrix[,GPL1261$DB_ID]
+rm(POE.matrix)
+
+load("~/Documents/Projects/Fingerprinting/data/random_v0.3_.POE.matrix.2011-06-16.RData")
+GPL570.random.matrix<-POE.matrix[,GPL570$DB_ID]
+GPL96.random.matrix<-POE.matrix[,GPL96$DB_ID]
+GPL1261.random.matrix<-POE.matrix[,GPL1261$DB_ID]
+human.random.matrix<-cbind(GPL570.random.matrix, GPL96.random.matrix)
+rm(POE.matrix)
+mouse.class<-GPL1261$Tissue
+human.matrix<-cbind(GPL570.matrix, GPL96.matrix)
+human.random.matrix<-cbind(GPL570.random.matrix, GPL96.random.matrix)
+human.data<-rbind(GPL570, GPL96)
+human.class<-human.data$Tissue
+names(mouse.class)<-GPL1261$DB_ID
+names(human.class)<-human.data$DB_ID
+@
+The next step is to define a function to convert a POE matrix to a ternary matrix, according to a threshold. We can then use the Manhattan distance to rank each human-mouse pairing and construct a PR curve for each sample. These can then be combined, interpollating to aggregate points with the same recall value.
+<<ternaryThreshold>>=
+ternaryThreshold <- function(matrix, threshold)
+  # function to convert a POE matrix to a thresholded matrix
+  {
+  high<-threshold
+  low<-(-threshold)
+  threshold.matrix<-(matrix>high)-(matrix<low)
+  threshold.matrix[is.na(threshold.matrix)]<-0
+  return(threshold.matrix)
+  }
+@
+<<precisionRecall_function>>=
+precisionRecall<-function(
+  testMatrix, recallMatrix, testClass, recallClass)
+  # Calculate precision and recall based on rank of distance pairs
+  {
+    # check values
+    if (!(all.equal(colnames(testMatrix), names(testClass)))
+        ) stop("Check test matrix and class should names match")
+    if (!(all.equal(colnames(recallMatrix), names(recallClass)))
+        ) stop("Recall matrix and class names should match")        
+    # define an object to hold the ranked lists
+    ordered<-vector("list", ncol(testMatrix))
+    for (i in 1:ncol(testMatrix)){
+      # rank by manhattan distance
+      ordered[[i]] <- sort(colSums(abs(apply(recallMatrix,
+                          2,
+                          function(x){x - testMatrix[,i, drop = FALSE]}
+                          ))))
+      # set names as correct or incorrectly matched
+      names(ordered[[i]])<-(recallClass[
+                              names(ordered[[i]])
+                                      ] == testClass[i])
+      }
+  # compile list from all samples 
+  ordered.all<-sort(unlist(ordered))
+  logical.ordered<-as.logical(names(ordered.all))
+  # define precision and recall
+  x<-1:length(logical.ordered)
+  recall<-sapply(x, function(x){
+                sum(logical.ordered[1:x])/sum(logical.ordered)
+                })
+  precision<-sapply(x, function(x){
+                  sum(logical.ordered[1:x])/x
+                  })
+  precision.recall<-data.frame(recall = recall, precision = precision)
+  return(precision.recall)
+  }
+@
+
+<<PRsamples>>=
+library(multicore)
+library(doMC)
+# run over 15 cores - i.e. 2 thresholds per core
+registerDoMC(cores = 15)
+PR.samples<-invisible(foreach (j = 1:30) %dopar% {
+  n <- seq(0.25, 0.25*30, 0.25)[j]
+  threshold<-10^(-n)
+  human.threshold<-ternaryThreshold(human.matrix, threshold)
+  GPL1261.threshold<-ternaryThreshold(GPL1261.matrix, threshold)
+  precision.recall.sample<-matrix(nrow = 100, ncol = ncol(GPL1261.threshold))
+  colnames(precision.recall.sample)<-colnames(GPL1261.threshold)
+  for (i in 1:ncol(GPL1261.threshold)){
+     PR <- precisionRecall(
+      testMatrix = GPL1261.threshold[,i, drop = FALSE],
+      recallMatrix = human.threshold,
+      testClass = mouse.class[i],
+      recallClass = human.class
+      )
+    precision.recall.sample[,i]<-approx(
+                x = PR$recall,
+                y = PR$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+    }
+  rowMeans(precision.recall.sample)
+  })
+@
+\begin{figure}
+\begin{center}
+<<label=fig11plot,fig=TRUE,echo = TRUE>>=
+op<-par(mfrow = c(1,1), pty = "s")
+par(mfrow = c(5,6), mar = c(1,1,1,1))
+n <- seq(0.25, 0.25*30, 0.25)
+for (i in 1:30){
+  plot.new()
+  axis(1, seq(0,1,0.5))
+  axis(2, seq(0,1,0.5))
+  title(paste("10^", n[i], sep = ""))
+  lines(x = seq(0.01, 1, 0.01), y = PR.samples[[i]])
+  }
+  par(op)
+@
+\end{center}
+\caption{Precision-recall curves for aggregated mouse to human tissues data based on a fingerprint}
+\label{fig:eleven}
+\end{figure}
+<<PRsamplesRandom>>=
+PR.samples.random<-invisible(foreach (j = 1:30) %dopar% {
+  n <- seq(0.25, 0.25*30, 0.25)[j]
+  threshold<-10^(-n)
+  human.threshold<-ternaryThreshold(human.random.matrix, threshold)
+  GPL1261.threshold<-ternaryThreshold(GPL1261.random.matrix, threshold)
+  precision.recall.sample<-matrix(nrow = 100, ncol = ncol(GPL1261.threshold))
+  colnames(precision.recall.sample)<-colnames(GPL1261.threshold)
+  for (i in 1:ncol(GPL1261.threshold)){
+     PR <- precisionRecall(
+      testMatrix = GPL1261.threshold[,i, drop = FALSE],
+      recallMatrix = human.threshold,
+      testClass = mouse.class[i],
+      recallClass = human.class
+      )
+    precision.recall.sample[,i]<-approx(
+                x = PR$recall,
+                y = PR$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+    }
+  rowMeans(precision.recall.sample)
+  })
+@
+\begin{figure}
+\begin{center}
+<<label=fig13plot,fig=TRUE,echo = TRUE>>=
+op<-par(mfrow = c(1,1), pty = "s")
+par(mfrow = c(5,6), mar = c(1,1,1,1))
+n <- seq(0.25, 0.25*30, 0.25)
+for (i in 1:30){
+  plot.new()
+  axis(1, seq(0,1,0.5))
+  axis(2, seq(0,1,0.5))
+  title(paste("10^", n[i], sep = ""))
+  lines(x = seq(0.01, 1, 0.01), y = PR.samples.random[[i]])
+  }
+  par(op)
+@
+\end{center}
+\caption{Precision-recall curves for aggregated mouse to human tissues data based on a fingerprint build using randomly constructed gene sets}
+\label{fig:thirteen}
+\end{figure}
+
+<<PRsamples_plus>>=
+PR.samples.plus<-invisible(foreach (j = 1:30) %dopar% {
+  n <- seq(0.25, 0.25*30, 0.25)[j]
+  threshold<-10^(-n)
+  human.threshold<-ternaryThreshold(human.matrix, threshold)
+  human.threshold<-human.threshold + ternaryThreshold(human.matrix, (10^(-0.25)))
+  GPL1261.threshold<-ternaryThreshold(GPL1261.matrix, threshold)
+  GPL1261.threshold<-GPL1261.threshold + ternaryThreshold(GPL1261.matrix, (10^(-0.25)))
+  precision.recall.sample<-matrix(nrow = 100, ncol = ncol(GPL1261.threshold))
+  colnames(precision.recall.sample)<-colnames(GPL1261.threshold)
+  for (i in 1:ncol(GPL1261.threshold)){
+     PR <- precisionRecall(
+      testMatrix = GPL1261.threshold[,i, drop = FALSE],
+      recallMatrix = human.threshold,
+      testClass = mouse.class[i],
+      recallClass = human.class
+      )
+    precision.recall.sample[,i]<-approx(
+                x = PR$recall,
+                y = PR$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+    }
+  rowMeans(precision.recall.sample)
+  })
+@
+\begin{figure}
+\begin{center}
+<<label=PRsamples_plusPlot,fig=TRUE,echo = TRUE>>=
+op<-par(mfrow = c(1,1), pty = "s")
+par(mfrow = c(5,6), mar = c(1,1,1,1))
+n <- seq(0.25, 0.25*30, 0.25)
+for (i in 1:30){
+  plot.new()
+  axis(1, seq(0,1,0.5))
+  axis(2, seq(0,1,0.5))
+  title(paste("10^", n[i], sep = ""))
+  lines(x = seq(0.01, 1, 0.01), y = PR.samples.plus[[i]], col = "red")
+  lines(x = seq(0.01, 1, 0.01), y = PR.samples[[i]], col = "blue")
+  }
+  par(op)
+@
+\end{center}
+\caption{Precision-recall curves for aggregated mouse to human tissues data based on fingerprint (blue) plus fingerprint for 0.25 threshold (red)}
+\label{fig:PRsamples_plusPlot}
+\end{figure}
+<<PRsamplesRandom_plus>>=
+PR.samples.random.plus<-invisible(foreach (j = 1:30) %dopar% {
+  n <- seq(0.25, 0.25*30, 0.25)[j]
+  threshold<-10^(-n)
+  human.threshold<-ternaryThreshold(human.random.matrix, threshold)
+  human.threshold<-human.threshold + ternaryThreshold(human.random.matrix, (10^(-0.25)))
+  GPL1261.threshold<-ternaryThreshold(GPL1261.random.matrix, threshold)
+  GPL1261.threshold<-GPL1261.threshold + ternaryThreshold(GPL1261.random.matrix, (10^(-0.25)))
+  precision.recall.sample<-matrix(nrow = 100, ncol = ncol(GPL1261.threshold))
+  colnames(precision.recall.sample)<-colnames(GPL1261.threshold)
+  for (i in 1:ncol(GPL1261.threshold)){
+     PR <- precisionRecall(
+      testMatrix = GPL1261.threshold[,i, drop = FALSE],
+      recallMatrix = human.threshold,
+      testClass = mouse.class[i],
+      recallClass = human.class
+      )
+    precision.recall.sample[,i]<-approx(
+                x = PR$recall,
+                y = PR$precision,
+                xout = seq(0.01, 1, 0.01),
+                rule = 2
+                )$y
+    }
+  rowMeans(precision.recall.sample)
+  })
+@
+\begin{figure}
+\begin{center}
+<<label=PRsamplesRandom_plusPlot,fig=TRUE,echo = TRUE>>=
+op<-par(mfrow = c(1,1), pty = "s")
+par(mfrow = c(5,6), mar = c(1,1,1,1))
+n <- seq(0.25, 0.25*30, 0.25)
+for (i in 1:30){
+  plot.new()
+  axis(1, seq(0,1,0.5))
+  axis(2, seq(0,1,0.5))
+  title(paste("10^", n[i], sep = ""))
+  lines(x = seq(0.01, 1, 0.01), y = PR.samples.random.plus[[i]], col = "red")
+  lines(x = seq(0.01, 1, 0.01), y = PR.samples.random[[i]], col = "blue")
+  }
+  par(op)
+@
+\end{center}
+\caption{Precision-recall curves for aggregated mouse to human tissues data based on a fingerprint build using randomly constructed gene sets (blue) and plus fingerprint at threshold 0.25 (red)}
+\label{fig:PRsamplesRandom_plusPlot}
+\end{figure}
+\end{document}
